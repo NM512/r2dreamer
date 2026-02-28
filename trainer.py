@@ -4,11 +4,12 @@ import tools
 
 
 class OnlineTrainer:
-    def __init__(self, config, replay_buffer, logger, logdir, train_envs, eval_envs):
+    def __init__(self, config, replay_buffer, logger, logdir, train_stepper, eval_stepper, heartbeat_fn=None):
         self.replay_buffer = replay_buffer
         self.logger = logger
-        self.train_envs = train_envs
-        self.eval_envs = eval_envs
+        self.train_stepper = train_stepper
+        self.eval_stepper = eval_stepper
+        self._heartbeat_fn = heartbeat_fn
         self.steps = int(config.steps)
         self.pretrain = int(config.pretrain)
         self.eval_every = int(config.eval_every)
@@ -27,37 +28,28 @@ class OnlineTrainer:
     def eval(self, agent, train_step):
         """Run evaluation episodes.
 
-        Environment stepping is executed on CPU to avoid GPU<->CPU synchronizations
-        in the worker processes. Observations are moved back to GPU asynchronously
-        (H2D with non_blocking=True) right before policy inference.
+        Device handling is delegated to ``self.eval_stepper``.
         """
         print("Evaluating the policy...")
-        envs = self.eval_envs
+        stepper = self.eval_stepper
+        # Reset all environments so eval always starts from fresh episodes.
+        stepper.reset()
         agent.eval()
         # (B,)
-        done = torch.ones(envs.env_num, dtype=torch.bool, device=agent.device)
-        once_done = torch.zeros(envs.env_num, dtype=torch.bool, device=agent.device)
-        steps = torch.zeros(envs.env_num, dtype=torch.int32, device=agent.device)
-        returns = torch.zeros(envs.env_num, dtype=torch.float32, device=agent.device)
+        done = torch.ones(stepper.env_num, dtype=torch.bool, device=agent.device)
+        once_done = torch.zeros(stepper.env_num, dtype=torch.bool, device=agent.device)
+        steps = torch.zeros(stepper.env_num, dtype=torch.int32, device=agent.device)
+        returns = torch.zeros(stepper.env_num, dtype=torch.float32, device=agent.device)
         log_metrics = {}
         # cache is only used for video logging / open-loop prediction.
         cache = []
-        agent_state = agent.get_initial_state(envs.env_num)
+        agent_state = agent.get_initial_state(stepper.env_num)
         # (B, A)
         act = agent_state["prev_action"].clone()
         while not once_done.all():
             steps += ~done * ~once_done
-            # Step environments on CPU.
-            # (B, A)
-            act_cpu = act.detach().to("cpu")
-            # (B,)
-            done_cpu = done.detach().to("cpu")
-            trans_cpu, done_cpu = envs.step(act_cpu, done_cpu)
-            # Move observations back to GPU asynchronously for the agent.
-            # dict of (B, 1, *)
-            trans = trans_cpu.to(agent.device, non_blocking=True)
-            # (B,)
-            done = done_cpu.to(agent.device)
+            # Step environments via the stepper (handles device transfers).
+            trans, done = stepper.step(act.detach(), done.detach())
 
             # Store transition.
             # We keep the observation and the action that produced it together.
@@ -100,29 +92,34 @@ class OnlineTrainer:
     def begin(self, agent):
         """Main online training loop.
 
-        The loop is designed to overlap CPU environment stepping and GPU model
-        execution. Environments are stepped on CPU, observations are pinned,
-        then transferred to GPU with non_blocking=True.
+        Device handling is delegated to ``self.train_stepper``.
         """
-        envs = self.train_envs
+        stepper = self.train_stepper
         video_cache = []
         step = self.replay_buffer.count() * self._action_repeat
         update_count = 0
         # (B,)
-        done = torch.ones(envs.env_num, dtype=torch.bool, device=agent.device)
-        returns = torch.zeros(envs.env_num, dtype=torch.float32, device=agent.device)
-        lengths = torch.zeros(envs.env_num, dtype=torch.int32, device=agent.device)
+        done = torch.ones(stepper.env_num, dtype=torch.bool, device=agent.device)
+        returns = torch.zeros(stepper.env_num, dtype=torch.float32, device=agent.device)
+        lengths = torch.zeros(stepper.env_num, dtype=torch.int32, device=agent.device)
         episode_ids = torch.arange(
-            envs.env_num, dtype=torch.int32, device=agent.device
+            stepper.env_num, dtype=torch.int32, device=agent.device
         )  # Increment this to prevent sampling across episode boundaries
         train_metrics = {}
-        agent_state = agent.get_initial_state(envs.env_num)
+        agent_state = agent.get_initial_state(stepper.env_num)
         # (B, A)
         act = agent_state["prev_action"].clone()
         while step < self.steps:
             # Evaluation
             if self._should_eval(step) and self.eval_episode_num > 0:
                 self.eval(agent, step)
+                stepper.reset()
+                done = torch.ones(stepper.env_num, dtype=torch.bool, device=agent.device)
+                returns.zero_()
+                lengths.zero_()
+                agent_state = agent.get_initial_state(stepper.env_num)
+                act = agent_state["prev_action"].clone()
+                video_cache = []
             # Save metrics
             if done.any():
                 for i, d in enumerate(done):
@@ -135,21 +132,11 @@ class OnlineTrainer:
                         self.logger.scalar("episode/length", lengths[i])
                         self.logger.write(step + i)  # to show all values on tensorboard
                         returns[i] = lengths[i] = 0
-            step += int((~done).sum()) * self._action_repeat  # step is based on env side
+            step += stepper.count_active_steps(done) * self._action_repeat
             lengths += ~done
 
-            # Step environments on CPU to avoid GPU<->CPU sync in the worker processes.
-            # (B, A)
-            act_cpu = act.detach().to("cpu")
-            # (B,)
-            done_cpu = done.detach().to("cpu")
-            trans_cpu, done_cpu = envs.step(act_cpu, done_cpu)
-
-            # Move observations back to GPU asynchronously for the agent.
-            # dict of (B, 1, *)
-            trans = trans_cpu.to(agent.device, non_blocking=True)
-            # (B,)
-            done = done_cpu.to(agent.device)
+            # Step environments via the stepper (handles device transfers).
+            trans, done = stepper.step(act.detach(), done.detach())
 
             # Policy inference on GPU.
             # "agent_state" is reset by the agent based on the "is_first" flag in trans.
@@ -168,7 +155,7 @@ class OnlineTrainer:
             self.replay_buffer.add_transition(trans.detach())
             returns += trans["reward"][:, 0]
             # Update models after enough data has accumulated
-            if step // (envs.env_num * self._action_repeat) > self.batch_length + 1:
+            if step // (stepper.env_num * self._action_repeat) > self.batch_length + 1:
                 if self._should_pretrain():
                     update_num = self.pretrain
                 else:
@@ -176,6 +163,8 @@ class OnlineTrainer:
                 for _ in range(update_num):
                     _metrics = agent.update(self.replay_buffer)
                     train_metrics = _metrics
+                    if self._heartbeat_fn is not None:
+                        self._heartbeat_fn()
                 update_count += update_num
                 # Log training metrics
                 if self._should_log(step):

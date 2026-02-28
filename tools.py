@@ -159,7 +159,36 @@ class Logger:
                 value = np.clip(255 * value, 0, 255).astype(np.uint8)
             B, T, H, W, C = value.shape
             value = value.transpose(1, 4, 2, 0, 3).reshape((1, T, C, H, B * W))
-            self._writer.add_video(name, value, step, 16)
+            # moviepy v2 removed moviepy.editor, which TensorBoard's
+            # add_video relies on. Detect this and write the GIF directly.
+            _has_moviepy_editor = True
+            try:
+                from moviepy import editor as _mpy_check  # noqa: F401
+            except ImportError:
+                _has_moviepy_editor = False
+            if _has_moviepy_editor:
+                self._writer.add_video(name, value, step, 16)
+            else:
+                try:
+                    import moviepy
+                    import tempfile, os
+                    from torch.utils.tensorboard.summary import Summary
+                    frames = list(value[0].transpose(1, 2, 3, 0))
+                    clip = moviepy.ImageSequenceClip(frames, fps=16)
+                    tmp = tempfile.NamedTemporaryFile(suffix=".gif", delete=False)
+                    clip.write_gif(tmp.name, logger=None)
+                    with open(tmp.name, "rb") as f:
+                        encoded = f.read()
+                    os.remove(tmp.name)
+                    _, T2, C2, H2, W2 = value.shape
+                    summary_img = Summary.Image(
+                        height=H2, width=W2, colorspace=C2,
+                        encoded_image_string=encoded,
+                    )
+                    summary = Summary(value=[Summary.Value(tag=name, image=summary_img)])
+                    self._writer.file_writer.add_summary(summary, step)
+                except Exception as e:
+                    print(f"Warning: could not log video '{name}': {e}")
         for name, value in self._histograms.items():
             self._writer.add_histogram(name, value, step)
 

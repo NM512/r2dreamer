@@ -1,0 +1,18 @@
+task: "isaaclab_cartpole_balance"
+steps: 5.1e5
+env_num: 16
+eval_episode_num: 10
+action_repeat: 2
+train_ratio: 512
+time_limit: 1000
+
+seed: ${seed}
+device: ${device}
+
+size: [64, 64]
+encoder:
+  mlp_keys: "policy"
+  cnn_keys: "$^"
+decoder:
+  mlp_keys: "policy"
+  cnn_keys: "$^"

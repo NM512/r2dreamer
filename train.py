@@ -39,7 +39,7 @@ def main(config):
     replay_buffer = Buffer(config.buffer)
 
     print("Create envs.")
-    train_envs, eval_envs, obs_space, act_space = make_envs(config.env)
+    train_stepper, eval_stepper, obs_space, act_space = make_envs(config.env)
 
     print("Simulate agent.")
     agent = Dreamer(
@@ -48,7 +48,14 @@ def main(config):
         act_space,
     ).to(config.device)
 
-    policy_trainer = OnlineTrainer(config.trainer, replay_buffer, logger, logdir, train_envs, eval_envs)
+    policy_trainer = OnlineTrainer(
+        config.trainer,
+        replay_buffer,
+        logger,
+        logdir,
+        train_stepper=train_stepper,
+        eval_stepper=eval_stepper,
+    )
     policy_trainer.begin(agent)
 
     items_to_save = {
