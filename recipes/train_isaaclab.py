@@ -118,7 +118,6 @@ def _build_cartpole_env(config, vision):
     from envs.isaac_cartpole_overrides import (
         patch_dmc_cartpole_obs,
         patch_dmc_cartpole_reward,
-        patch_dmc_cartpole_reset,
         patch_no_termination,
         apply_dmc_cartpole_colors,
     )
@@ -132,7 +131,7 @@ def _build_cartpole_env(config, vision):
         patch_no_termination,
         functools.partial(patch_dmc_cartpole_reward, action_repeat=int(config.action_repeat)),
         patch_dmc_cartpole_obs,
-        patch_dmc_cartpole_reset,
+        # patch_dmc_cartpole_reset,
     ]
 
     return _make_env(
@@ -173,12 +172,14 @@ def _make_env(config, gym_id, render_mode=None, pre_wrap_fns=(), post_create_fn=
     env_cfg.scene.num_envs = int(config.env_num)
     env_cfg.decimation = int(config.action_repeat)
     env_cfg.seed = int(config.seed)
-    env_cfg.episode_length_s = config.time_limit * env_cfg.sim.dt + env_cfg.sim.dt * env_cfg.decimation
-    env_cfg.sim.render_interval = env_cfg.decimation
+    env_cfg.episode_length_s = config.time_limit * env_cfg.sim.dt
+
+    # OmegaConf.update(config, "action_repeat", 1)
 
     if render_mode == "rgb_array":
         env_cfg.tiled_camera.width = config.size[1]  # TODO: move this to the overrides for vision tasks
         env_cfg.tiled_camera.height = config.size[0]
+        env_cfg.tiled_camera.offset.pos = (-3.4, 0.0, 2.0)
         from isaaclab.sim import RenderCfg
 
         env_cfg.sim.render = RenderCfg(antialiasing_mode="Off")
