@@ -281,8 +281,15 @@ def apply_dmc_cartpole_colors(env):
             vis_attr.Set(True)
 
     # ---- ground plane ----
+    # Calculate ground plane size based on number of environments
+    num_envs = env.num_envs
+    env_spacing = env.scene.cfg.env_spacing
+    # IsaacLab arranges envs in a square grid
+    num_envs_per_row = int(np.ceil(np.sqrt(num_envs)))
+    ground_size = num_envs_per_row * env_spacing * 1.5
+
     ground_cfg = sim_utils.CuboidCfg(
-        size=(40.0, 40.0, 0.01),
+        size=(ground_size, ground_size, 0.01),
         visual_material=sim_utils.PreviewSurfaceCfg(
             diffuse_color=(0.04, 0.20, 0.31),
             roughness=0.8,
