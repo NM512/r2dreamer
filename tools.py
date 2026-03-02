@@ -173,7 +173,9 @@ class Logger:
                     import moviepy
                     import tempfile, os
                     from torch.utils.tensorboard.summary import Summary
-                    frames = list(value[0].transpose(1, 2, 3, 0))
+
+                    # value[0] is (T, C, H, W) — transpose to (T, H, W, C) for moviepy
+                    frames = list(value[0].transpose(0, 2, 3, 1))
                     clip = moviepy.ImageSequenceClip(frames, fps=16)
                     tmp = tempfile.NamedTemporaryFile(suffix=".gif", delete=False)
                     clip.write_gif(tmp.name, logger=None)
