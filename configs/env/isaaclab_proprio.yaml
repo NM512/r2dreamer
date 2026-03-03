@@ -5,6 +5,7 @@ eval_episode_num: 10
 action_repeat: 2
 train_ratio: 512
 time_limit: 1000
+sim_dt: 0.01
 
 seed: ${seed}
 device: ${device}

@@ -169,6 +169,11 @@ def _make_env(config, gym_id, render_mode=None, pre_wrap_fns=(), post_create_fn=
         env_cfg_class = env_cfg_entry
 
     env_cfg = env_cfg_class()
+
+    sim_dt = getattr(config, "sim_dt", None)
+    if sim_dt is not None:
+        env_cfg.sim.dt = float(sim_dt)
+
     env_cfg.scene.num_envs = int(config.env_num)
     env_cfg.decimation = int(config.action_repeat)
     env_cfg.seed = int(config.seed)
