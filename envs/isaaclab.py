@@ -141,22 +141,40 @@ class IsaacLabVecEnv:
                 val = val.unsqueeze(-1)
             data[key] = val
 
-        # is_first: True for envs that were reset (done on the *previous* step,
-        # handled by IsaacLab auto-reset) — stored from the last call.
-        data["is_first"] = self._is_first.unsqueeze(-1)
+        # IsaacLab auto-resets terminated/truncated envs *inside* its step()
+        # and returns the post-reset observation (obs_0 of the NEW episode) as
+        # part of the same step() return.  This means:
+        #
+        #   episode_done[i]=True  →  obs_dict[i] is already the FIRST obs of
+        #                            the new episode, NOT the terminal obs.
+        #
+        # Therefore is_first must fire on the SAME step as episode_done, not
+        # the next one.  We OR with self._is_first to also handle the very
+        # first call after __init__ / reset().
+        is_first_now = self._is_first | episode_done
+        data["is_first"] = is_first_now.unsqueeze(-1)
         # is_terminal: True when the episode ended due to a failure condition
         # (not time-based truncation).
         data["is_terminal"] = terminated.unsqueeze(-1)
         # is_last: True whenever the episode ended for any reason.
+        # Note: this fires on the post-reset obs (unavoidable without IsaacLab
+        # exposing the true terminal obs), but is_first is now correct.
         data["is_last"] = episode_done.unsqueeze(-1)
-        # reward: (B,) → (B, 1)
+        # reward: Zero out reward when episode_done because the returned reward
+        # is the terminal reward from the OLD episode, but obs_dict is the
+        # post-reset obs from the NEW episode. Pairing terminal reward with
+        # post-reset obs teaches the world model a physically impossible
+        # instantaneous reset transition. The terminal reward is lost
+        # (unavoidable without IsaacLab exposing it separately).
+        reward = torch.where(episode_done, torch.zeros_like(reward), reward)
         data["reward"] = reward.float().unsqueeze(-1)
+
+        # TODO: find a solution for this problem to avoid losing terminal rewards.
 
         td = TensorDict(data, batch_size=(self._num_envs,), device=self._device)
 
-        # Update is_first for the *next* step: any env that just ended will
-        # have been auto-reset by IsaacLab, so its next observation is a
-        # first observation.
-        self._is_first = episode_done.clone()
+        # _is_first has been consumed this step; clear it.  It will be set to
+        # ones again only by an explicit reset() call.
+        self._is_first = torch.zeros(self._num_envs, dtype=torch.bool, device=self._device)
 
         return td, episode_done
