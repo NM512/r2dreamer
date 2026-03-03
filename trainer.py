@@ -101,9 +101,10 @@ class OnlineTrainer:
         done = torch.ones(stepper.env_num, dtype=torch.bool, device=agent.device)
         returns = torch.zeros(stepper.env_num, dtype=torch.float32, device=agent.device)
         lengths = torch.zeros(stepper.env_num, dtype=torch.int32, device=agent.device)
-        episode_ids = torch.arange(
-            stepper.env_num, dtype=torch.int32, device=agent.device
-        )  # Increment this to prevent sampling across episode boundaries
+        episode_ids = torch.arange(stepper.env_num, dtype=torch.int32, device=agent.device)
+        # Global counter for unique episode IDs — incremented whenever an env
+        # resets so SliceSampler never samples across episode boundaries.
+        _next_episode_id = stepper.env_num
         train_metrics = {}
         agent_state = agent.get_initial_state(stepper.env_num)
         # (B, A)
@@ -136,6 +137,12 @@ class OnlineTrainer:
 
             # Step environments via the stepper (handles device transfers).
             trans, done = stepper.step(act.detach(), done.detach())
+
+            # Assign a new unique episode ID to every env that just finished so
+            # SliceSampler detects the boundary and never samples across it.
+            for _i in done.nonzero(as_tuple=False).squeeze(-1).tolist():
+                episode_ids[_i] = _next_episode_id
+                _next_episode_id += 1
 
             # Policy inference on GPU.
             # "agent_state" is reset by the agent based on the "is_first" flag in trans.
