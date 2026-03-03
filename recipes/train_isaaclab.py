@@ -120,6 +120,7 @@ def _build_cartpole_env(config, vision):
         patch_dmc_cartpole_reward,
         patch_no_termination,
         apply_dmc_cartpole_colors,
+        patch_dmc_cartpole_reset,
     )
 
     ids = KNOWN_TASKS["cartpole_balance"]
@@ -131,7 +132,7 @@ def _build_cartpole_env(config, vision):
         patch_no_termination,
         functools.partial(patch_dmc_cartpole_reward, action_repeat=int(config.action_repeat)),
         patch_dmc_cartpole_obs,
-        # patch_dmc_cartpole_reset,
+        patch_dmc_cartpole_reset,
     ]
 
     return _make_env(
