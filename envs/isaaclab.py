@@ -120,12 +120,12 @@ class IsaacLabVecEnv:
         # IsaacLab expects the action on its own device.
         action = action.to(self._device)
 
-        obs_dict, reward, terminated, truncated, _ = self._env.step(action)
-
         # Pump the Omniverse Kit event loop so livestream (WebRTC/WebSocket)
         # can accept connections and push frames.
-        if self._app is not None:
-            self._app.update()
+        # if self._app is not None:
+        #     self._app.update()
+
+        obs_dict, reward, terminated, truncated, _ = self._env.step(action)
 
         episode_done = terminated | truncated
 

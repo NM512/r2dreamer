@@ -4,12 +4,11 @@ import tools
 
 
 class OnlineTrainer:
-    def __init__(self, config, replay_buffer, logger, logdir, train_stepper, eval_stepper, heartbeat_fn=None):
+    def __init__(self, config, replay_buffer, logger, logdir, train_stepper, eval_stepper):
         self.replay_buffer = replay_buffer
         self.logger = logger
         self.train_stepper = train_stepper
         self.eval_stepper = eval_stepper
-        self._heartbeat_fn = heartbeat_fn
         self.steps = int(config.steps)
         self.pretrain = int(config.pretrain)
         self.eval_every = int(config.eval_every)
@@ -163,8 +162,6 @@ class OnlineTrainer:
                 for _ in range(update_num):
                     _metrics = agent.update(self.replay_buffer)
                     train_metrics = _metrics
-                    if self._heartbeat_fn is not None:
-                        self._heartbeat_fn()
                 update_count += update_num
                 # Log training metrics
                 if self._should_log(step):

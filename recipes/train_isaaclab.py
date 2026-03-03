@@ -253,7 +253,6 @@ def main(config):
         logdir,
         train_stepper=train_envs,
         eval_stepper=eval_envs,
-        heartbeat_fn=simulation_app.update,
     )
 
     try:
