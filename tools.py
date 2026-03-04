@@ -1,15 +1,14 @@
-import contextlib
 import io
 import json
 import os
 import random
 import time
+from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
 from torch import nn
 from torch.nn import init as nn_init
-from torch.utils.tensorboard import SummaryWriter
 
 
 class Tee(io.TextIOBase):
@@ -115,17 +114,59 @@ class CudaBenchmark:
         print(self._comment, self._st.elapsed_time(self._nd) / 1000)
 
 
+class LoggerBackend(ABC):
+    """Interface that every logging backend must implement."""
+
+    @abstractmethod
+    def log_scalar(self, name: str, value: float, step: int):
+        pass
+
+    @abstractmethod
+    def log_image(self, name: str, value: np.ndarray, step: int):
+        pass
+
+    @abstractmethod
+    def log_video(self, name: str, value: np.ndarray, step: int):
+        pass
+
+    @abstractmethod
+    def log_histogram(self, name: str, value: np.ndarray, step: int):
+        pass
+
+    @abstractmethod
+    def log_text(self, name: str, text: str, step: int):
+        pass
+
+    @abstractmethod
+    def log_hparams(self, hparams: dict, metrics: dict, run_name: str):
+        pass
+
+    @abstractmethod
+    def flush(self):
+        pass
+
+    @abstractmethod
+    def close(self, exit_code=0):
+        pass
+
+
 class Logger:
-    def __init__(self, logdir, filename="metrics.jsonl"):
-        self._logdir = logdir
-        self._filename = filename
-        self._writer = SummaryWriter(log_dir=str(logdir), max_queue=1000)
+    def __init__(self, logdir, filename="metrics.jsonl", backends=None):
         self._last_step = None
         self._last_time = None
         self._scalars = {}
         self._images = {}
         self._videos = {}
         self._histograms = {}
+
+        if backends is not None:
+            self._backends = backends
+        else:
+            # Default: JSONL + TensorBoard (fully backward compatible)
+            self._backends = [
+                JSONLBackend(logdir, filename),
+                TensorBoardBackend(logdir),
+            ]
 
     def scalar(self, name, value):
         self._scalars[name] = float(value)
@@ -144,57 +185,22 @@ class Logger:
         if fps:
             scalars.append(("fps/fps", self._compute_fps(step)))
         print(f"[{step}]", " / ".join(f"{k} {v:.1f}" for k, v in scalars))
-        with (self._logdir / self._filename).open("a") as f:
-            f.write(json.dumps({"step": step, **dict(scalars)}) + "\n")
         for name, value in scalars:
-            if "/" not in name:
-                self._writer.add_scalar("scalars/" + name, value, step)
-            else:
-                self._writer.add_scalar(name, value, step)
+            for b in self._backends:
+                b.log_scalar(name, value, step)
         for name, value in self._images.items():
-            self._writer.add_image(name, value, step)
+            for b in self._backends:
+                b.log_image(name, value, step)
         for name, value in self._videos.items():
-            name = name if isinstance(name, str) else name.decode("utf-8")
-            if np.issubdtype(value.dtype, np.floating):
-                value = np.clip(255 * value, 0, 255).astype(np.uint8)
-            B, T, H, W, C = value.shape
-            value = value.transpose(1, 4, 2, 0, 3).reshape((1, T, C, H, B * W))
-            # moviepy v2 removed moviepy.editor, which TensorBoard's
-            # add_video relies on. Detect this and write the GIF directly.
-            _has_moviepy_editor = True
-            try:
-                from moviepy import editor as _mpy_check  # noqa: F401
-            except ImportError:
-                _has_moviepy_editor = False
-            if _has_moviepy_editor:
-                self._writer.add_video(name, value, step, 16)
-            else:
-                try:
-                    import moviepy
-                    import tempfile, os
-                    from torch.utils.tensorboard.summary import Summary
-
-                    # value[0] is (T, C, H, W) — transpose to (T, H, W, C) for moviepy
-                    frames = list(value[0].transpose(0, 2, 3, 1))
-                    clip = moviepy.ImageSequenceClip(frames, fps=16)
-                    tmp = tempfile.NamedTemporaryFile(suffix=".gif", delete=False)
-                    clip.write_gif(tmp.name, logger=None)
-                    with open(tmp.name, "rb") as f:
-                        encoded = f.read()
-                    os.remove(tmp.name)
-                    _, T2, C2, H2, W2 = value.shape
-                    summary_img = Summary.Image(
-                        height=H2, width=W2, colorspace=C2,
-                        encoded_image_string=encoded,
-                    )
-                    summary = Summary(value=[Summary.Value(tag=name, image=summary_img)])
-                    self._writer.file_writer.add_summary(summary, step)
-                except Exception as e:
-                    print(f"Warning: could not log video '{name}': {e}")
+            for b in self._backends:
+                b.log_video(name, value, step)
         for name, value in self._histograms.items():
-            self._writer.add_histogram(name, value, step)
+            for b in self._backends:
+                b.log_histogram(name, value, step)
 
-        self._writer.flush()
+        for b in self._backends:
+            b.flush()
+
         self._scalars = {}
         self._images = {}
         self._videos = {}
@@ -212,11 +218,11 @@ class Logger:
 
     def log_hydra_config(self, config, name="config", step=0, log_hparams=False, hparams_run_name="."):
         """
-        Log a Hydra/OmegaConf config to TensorBoard:
+        Log a Hydra/OmegaConf config to all backends:
           - as YAML text under "{name}/yaml"
-          - as flattened hparams to the HParams plugin
+          - as flattened hparams
         """
-        # 1) Log YAML to Text plugin
+        # 1) Log YAML text
         yaml_str = None
         try:
             from omegaconf import (
@@ -227,9 +233,10 @@ class Logger:
         except ImportError:
             # Fallback to string representation
             yaml_str = str(config)
-        self._writer.add_text(f"{name}/yaml", f"```yaml\n{yaml_str}\n```", step)
+        for b in self._backends:
+            b.log_text(f"{name}/yaml", f"```yaml\n{yaml_str}\n```", step)
 
-        # 2) Log flattened hparams to HParams plugin
+        # 2) Log flattened hparams
         flat = {}
         container = None
         try:
@@ -253,10 +260,159 @@ class Logger:
                     flat[prefix] = str(obj)
 
             _flatten("", container)
-            # add_hparams requires a non-empty metrics dict
-            with contextlib.suppress(TypeError):
-                # Avoid creating a timestamped subdirectory by specifying run_name (PyTorch >= 1.14)
-                self._writer.add_hparams(flat, {"_": 0}, run_name=hparams_run_name)
+            for b in self._backends:
+                b.log_hparams(flat, {"_": 0}, run_name=hparams_run_name)
+
+    def close(self, exit_code=0):
+        for b in self._backends:
+            b.close(exit_code=exit_code)
+
+
+class JSONLBackend(LoggerBackend):
+    """Appends scalar metrics as one JSON object per step to a JSONL file.
+
+    Images, videos, histograms, and hparams are silently ignored.
+    """
+
+    def __init__(self, logdir, filename="metrics.jsonl"):
+        self._path = logdir / filename
+        self._pending = {}
+
+    def _entry(self, step):
+        if step not in self._pending:
+            self._pending[step] = {"step": step}
+        return self._pending[step]
+
+    def log_scalar(self, name, value, step):
+        self._entry(step)[name] = value
+
+    def log_image(self, name, value, step):
+        pass
+
+    def log_video(self, name, value, step):
+        pass
+
+    def log_histogram(self, name, value, step):
+        pass
+
+    def log_text(self, name, text, step):
+        self._entry(step)[name] = text
+
+    def log_hparams(self, hparams, metrics, run_name="."):
+        pass
+
+    def flush(self):
+        if self._pending:
+            with self._path.open("a") as f:
+                for entry in self._pending.values():
+                    f.write(json.dumps(entry) + "\n")
+            self._pending = {}
+
+    def close(self, exit_code=0):
+        self.flush()
+
+
+class TensorBoardBackend(LoggerBackend):
+    def __init__(self, logdir):
+        from torch.utils.tensorboard import SummaryWriter
+
+        self._writer = SummaryWriter(log_dir=str(logdir), max_queue=1000)
+
+    def log_scalar(self, name, value, step):
+        tag = name if "/" in name else "scalars/" + name
+        self._writer.add_scalar(tag, value, step)
+
+    def log_image(self, name, value, step):
+        self._writer.add_image(name, value, step)
+
+    def log_video(self, name, value, step):
+        name = name if isinstance(name, str) else name.decode("utf-8")
+        if np.issubdtype(value.dtype, np.floating):
+            value = np.clip(255 * value, 0, 255).astype(np.uint8)
+        B, T, H, W, C = value.shape
+        value = value.transpose(1, 4, 2, 0, 3).reshape((1, T, C, H, B * W))
+        self._writer.add_video(name, value, step, 16)
+
+    def log_histogram(self, name, value, step):
+        self._writer.add_histogram(name, value, step)
+
+    def log_text(self, name, text, step):
+        self._writer.add_text(name, text, step)
+
+    def log_hparams(self, hparams, metrics, run_name="."):
+        import contextlib
+
+        # add_hparams requires a non-empty metrics dict
+        with contextlib.suppress(TypeError):
+            # Avoid creating a timestamped subdirectory by specifying run_name (PyTorch >= 1.14)
+            self._writer.add_hparams(hparams, metrics, run_name=run_name)
+
+    def flush(self):
+        self._writer.flush()
+
+    def close(self, exit_code=0):
+        self._writer.close()
+
+
+class WandbBackend(LoggerBackend):
+    """W&B backend.  ``import wandb`` only happens when this class is
+    instantiated, so it is safe to *define* on machines without wandb.
+
+    Parameters
+    ----------
+    wandb_cfg : dict
+        Dictionary forwarded as keyword arguments to ``wandb.init``.
+        Typical keys: ``project``, ``name``, ``config``, ``group``,
+        ``tags``, ``notes``, ``mode``, etc.  See the wandb documentation
+        for the full list.
+
+    Example
+    -------
+    >>> backend = WandbBackend({
+    ...     "project": "my-project",
+    ...     "name": "run-42",
+    ...     "config": {"lr": 3e-4, "seed": 42},
+    ... })
+    """
+
+    def __init__(self, wandb_cfg: dict):
+        import wandb  # deferred import — only runs if caller creates this backend
+
+        self._wandb = wandb
+        if wandb.run is None:
+            wandb.init(**wandb_cfg)
+
+    def log_scalar(self, name, value, step):
+        self._wandb.log({name: value}, step=step)
+
+    def log_image(self, name, value, step):
+        self._wandb.log({name: self._wandb.Image(value)}, step=step)
+
+    def log_video(self, name, value, step):
+        name = name if isinstance(name, str) else name.decode("utf-8")
+        if np.issubdtype(value.dtype, np.floating):
+            value = np.clip(255 * value, 0, 255).astype(np.uint8)
+        # Log first batch element; wandb expects (T, C, H, W)
+        self._wandb.log(
+            {name: self._wandb.Video(value[0].transpose(0, 3, 1, 2), fps=16, format="gif")},
+            step=step,
+        )
+
+    def log_histogram(self, name, value, step):
+        self._wandb.log({name: self._wandb.Histogram(value)}, step=step)
+
+    def log_text(self, name, text, step):
+        self._wandb.log({name: text}, step=step)
+
+    def log_hparams(self, hparams, metrics, run_name="."):
+        # wandb config is set at init; update if new keys arrive
+        self._wandb.config.update(hparams, allow_val_change=True)
+
+    def flush(self):
+        self._wandb.log({}, commit=True)  # TODO: is this needed?
+
+    def close(self, exit_code=0):
+        self._wandb.finish(exit_code=exit_code)
 
 
 def convert(value, precision=32):

@@ -47,8 +47,8 @@ Monitor with TensorBoard::
 # =============================================================================
 
 import argparse
-import sys
 import pathlib
+import sys
 
 # Auto-detect vision env from CLI and enable cameras before AppLauncher
 # parses argv, so the user doesn't have to pass --enable_cameras manually.
@@ -90,14 +90,13 @@ sys.path.append(str(pathlib.Path(__file__).parent.parent))
 warnings.filterwarnings("ignore")
 torch.set_float32_matmul_precision("high")
 
+# Register IsaacLab task environments (triggers gymnasium gym.register calls).
+import isaaclab_tasks  # noqa: F401
 import tools
 from buffer import Buffer
 from dreamer import Dreamer
 from envs import make_envs, make_isaac_env
 from trainer import OnlineTrainer
-
-# Register IsaacLab task environments (triggers gymnasium gym.register calls).
-import isaaclab_tasks  # noqa: F401
 
 # =============================================================================
 # Task registry — all task-specific knowledge lives here, not in envs/__init__.py
@@ -116,11 +115,11 @@ KNOWN_TASKS = {
 def _build_cartpole_env(config, vision):
     """Build a cartpole env with DMC-style overrides."""
     from envs.isaac_cartpole_overrides import (
+        apply_dmc_cartpole_colors,
         patch_dmc_cartpole_obs,
+        patch_dmc_cartpole_reset,
         patch_dmc_cartpole_reward,
         patch_no_termination,
-        apply_dmc_cartpole_colors,
-        patch_dmc_cartpole_reset,
     )
 
     ids = KNOWN_TASKS["cartpole_balance"]
@@ -160,6 +159,7 @@ def _make_env(config, gym_id, render_mode=None, pre_wrap_fns=(), post_create_fn=
             task-specific config overrides (dt, action_scale, …).
     """
     import importlib
+
     import gymnasium as gym
 
     env_cfg_entry = gym.spec(gym_id).kwargs["env_cfg_entry_point"]
@@ -233,7 +233,19 @@ def main(config):
 
     print("Logdir", logdir)
 
-    logger = tools.Logger(logdir)
+    wandb_cfg = {
+        "project": "r2dreamer-isaaclab",
+        "name": f"{full_task}_{config.seed}",
+        "dir": str(logdir),
+    }
+    logger = tools.Logger(
+        logdir,
+        backends=[
+            tools.JSONLBackend(logdir),
+            # tools.TensorBoardBackend(logdir),
+            tools.WandbBackend(wandb_cfg),
+        ],
+    )
     logger.log_hydra_config(config)
 
     replay_buffer = Buffer(config.buffer)
@@ -261,16 +273,29 @@ def main(config):
         eval_stepper=eval_envs,
     )
 
+    exit_code = 0
     try:
         policy_trainer.begin(agent)
     except KeyboardInterrupt:
-        print("\nTraining interrupted.")
+        print("\nTraining interrupted by user (Ctrl+C).")
+        exit_code = 1
+    except Exception as e:
+        print(f"\n{'='*60}")
+        print(f"TRAINING CRASHED: {type(e).__name__}: {e}")
+        print(f"{'='*60}")
+        import traceback
+
+        traceback.print_exc()
+        exit_code = 1
     finally:
         items_to_save = {
             "agent_state_dict": agent.state_dict(),
             "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
         }
         torch.save(items_to_save, logdir / "latest.pt")
+        print(f"Checkpoint saved to {logdir / 'latest.pt'}")
+
+        logger.close(exit_code=exit_code)
         vec_env._env.close()
         simulation_app.close()
 
