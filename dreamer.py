@@ -289,22 +289,30 @@ class Dreamer(nn.Module):
         # (B, T, E)
         embed = self.encoder(data)
 
+        T = data["action"].shape[1]
+        context_len = min(5, T)
+
         post_stoch, post_deter, _ = self.rssm.observe(
-            embed[:B, :5],
-            data["action"][:B, :5],
+            embed[:B, :context_len],
+            data["action"][:B, :context_len],
             tuple(val[:B] for val in initial),
-            data["is_first"][:B, :5],
+            data["is_first"][:B, :context_len],
         )
         recon = self.decoder(post_stoch, post_deter)["image"].mode()[:B]
-        init_stoch, init_deter = post_stoch[:, -1], post_deter[:, -1]
-        prior_stoch, prior_deter = self.rssm.imagine_with_action(
-            init_stoch,
-            init_deter,
-            data["action"][:B, 5:],
-        )
-        openl = self.decoder(prior_stoch, prior_deter)["image"].mode()
-        model = torch.cat([recon[:, :5], openl], 1)
-        truth = data["image"][:B]
+
+        if T > context_len:
+            init_stoch, init_deter = post_stoch[:, -1], post_deter[:, -1]
+            prior_stoch, prior_deter = self.rssm.imagine_with_action(
+                init_stoch,
+                init_deter,
+                data["action"][:B, context_len:],
+            )
+            openl = self.decoder(prior_stoch, prior_deter)["image"].mode()
+            model = torch.cat([recon[:, :context_len], openl], 1)
+        else:
+            model = recon[:, :context_len]
+
+        truth = data["image"][:B, :model.shape[1]]
         error = (model - truth + 1.0) / 2.0
         return torch.cat([truth, model, error], 2)
 
