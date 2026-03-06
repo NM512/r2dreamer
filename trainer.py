@@ -7,6 +7,7 @@ class OnlineTrainer:
     def __init__(self, config, replay_buffer, logger, logdir, train_stepper, eval_stepper):
         self.replay_buffer = replay_buffer
         self.logger = logger
+        self.logdir = logdir
         self.train_stepper = train_stepper
         self.eval_stepper = eval_stepper
         self.steps = int(config.steps)
@@ -23,6 +24,9 @@ class OnlineTrainer:
         self._should_log = tools.Every(config.update_log_every)
         self._should_eval = tools.Every(self.eval_every)
         self._action_repeat = config.action_repeat
+        # Debug: memory profiling
+        self._memory_history_snapshot = bool(config.memory_history_snapshot)
+        self._memory_history_steps = int(config.memory_history_steps)
 
     def eval(self, agent, train_step):
         """Run evaluation episodes.
@@ -97,6 +101,13 @@ class OnlineTrainer:
         video_cache = []
         step = self.replay_buffer.count() * self._action_repeat
         update_count = 0
+        # Debug: memory history snapshot
+        _mem_recording = False
+        _mem_update_count = 0
+        if self._memory_history_snapshot:
+            print(f"[Debug] Memory history recording enabled — will record {self._memory_history_steps} training steps.")
+            torch.cuda.memory._record_memory_history(max_entries=1048576)
+            _mem_recording = True
         # (B,)
         done = torch.ones(stepper.env_num, dtype=torch.bool, device=agent.device)
         returns = torch.zeros(stepper.env_num, dtype=torch.float32, device=agent.device)
@@ -169,6 +180,15 @@ class OnlineTrainer:
                 for _ in range(update_num):
                     _metrics = agent.update(self.replay_buffer)
                     train_metrics = _metrics
+                    if _mem_recording:
+                        _mem_update_count += 1
+                        if _mem_update_count >= self._memory_history_steps:
+                            snapshot_path = self.logdir / "memory_snapshot.pickle"
+                            torch.cuda.memory._dump_snapshot(str(snapshot_path))
+                            torch.cuda.memory._record_memory_history(enabled=None)
+                            _mem_recording = False
+                            print(f"[Debug] Memory snapshot saved to {snapshot_path}")
+                            print("[Debug] View it at: https://pytorch.org/memory_viz")
                 update_count += update_num
                 # Log training metrics
                 if self._should_log(step):

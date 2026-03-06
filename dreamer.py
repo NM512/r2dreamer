@@ -21,6 +21,7 @@ class Dreamer(nn.Module):
     def __init__(self, config, obs_space, act_space):
         super().__init__()
         self.device = torch.device(config.device)
+        self._memory_peak_tracking = bool(config.memory_peak_tracking)
         self.act_entropy = float(config.act_entropy)
         self.kl_free = float(config.kl_free)
         self.imag_horizon = int(config.imag_horizon)
@@ -316,8 +317,15 @@ class Dreamer(nn.Module):
         if self.rep_loss == "dreamerpro":
             self.ema_update()
         metrics = {}
+        if self._memory_peak_tracking:
+            torch.cuda.reset_peak_memory_stats(self.device)
+            metrics["memory/baseline_MiB"] = torch.cuda.memory_allocated(self.device) / 1048576
         with autocast(device_type=self.device.type, dtype=torch.float16):
             (stoch, deter), mets = self._cal_grad(p_data, initial)
+        if self._memory_peak_tracking:
+            metrics["memory/total_peak_MiB"] = torch.cuda.max_memory_allocated(self.device) / 1048576
+            metrics["memory/allocated_after_update_MiB"] = torch.cuda.memory_allocated(self.device) / 1048576
+            metrics["memory/reserved_MiB"] = torch.cuda.memory_reserved(self.device) / 1048576
         self._scaler.unscale_(self._optimizer)  # unscale grads in params
         if self.rep_loss == "dreamerpro" and self._ema_updates < self.freeze_prototypes_iters:
             self._prototypes.grad.zero_()
@@ -361,14 +369,23 @@ class Dreamer(nn.Module):
         losses = {}
         metrics = {}
         B, T = data.shape
+        _mpt = self._memory_peak_tracking
 
         # === World model: posterior rollout and KL losses ===
+        if _mpt:
+            torch.cuda.reset_peak_memory_stats(self.device)
         # (B, T, E)
         embed = self.encoder(data)
+        if _mpt:
+            metrics["memory/encoder_peak_MiB"] = torch.cuda.max_memory_allocated(self.device) / 1048576
+        if _mpt:
+            torch.cuda.reset_peak_memory_stats(self.device)
         # (B, T, S, K), (B, T, D), (B, T, S, K)
         post_stoch, post_deter, post_logit = self.rssm.observe(embed, data["action"], initial, data["is_first"])
         # (B, T, S, K)
         _, prior_logit = self.rssm.prior(post_deter)
+        if _mpt:
+            metrics["memory/rssm_observe_peak_MiB"] = torch.cuda.max_memory_allocated(self.device) / 1048576
         dyn_loss, rep_loss = self.rssm.kl_loss(post_logit, prior_logit, self.kl_free)
         losses["dyn"] = torch.mean(dyn_loss)
         losses["rep"] = torch.mean(rep_loss)
@@ -435,6 +452,8 @@ class Dreamer(nn.Module):
         metrics["rep_entropy"] = torch.mean(self.rssm.get_dist(post_logit).entropy())
 
         # === Imagination rollout for actor-critic ===
+        if _mpt:
+            torch.cuda.reset_peak_memory_stats(self.device)
         # (B*T, S, K), (B*T, D)
         start = (
             post_stoch.reshape(-1, *post_stoch.shape[2:]).detach(),
@@ -443,6 +462,8 @@ class Dreamer(nn.Module):
         # (B, T, ...) -> (B*T, ...)
         imag_feat, imag_action = self._imagine(start, self.imag_horizon + 1)
         imag_feat, imag_action = imag_feat.detach(), imag_action.detach()
+        if _mpt:
+            metrics["memory/imagination_peak_MiB"] = torch.cuda.max_memory_allocated(self.device) / 1048576
 
         # (B*T, T_imag, 1)
         imag_reward = self._frozen_reward(imag_feat).mode()
@@ -523,7 +544,11 @@ class Dreamer(nn.Module):
         metrics.update(tools.tensorstats(slow_value, "slow_value_replay"))
 
         total_loss = sum([v * self._loss_scales[k] for k, v in losses.items()])
+        if _mpt:
+            torch.cuda.reset_peak_memory_stats(self.device)
         self._scaler.scale(total_loss).backward()
+        if _mpt:
+            metrics["memory/backward_peak_MiB"] = torch.cuda.max_memory_allocated(self.device) / 1048576
 
         metrics.update({f"loss/{name}": loss for name, loss in losses.items()})
         metrics.update({"opt/loss": total_loss})
