@@ -1,6 +1,5 @@
-import torch
-
 import tools
+import torch
 
 
 class OnlineTrainer:
@@ -105,7 +104,9 @@ class OnlineTrainer:
         _mem_recording = False
         _mem_update_count = 0
         if self._memory_history_snapshot:
-            print(f"[Debug] Memory history recording enabled — will record {self._memory_history_steps} training steps.")
+            print(
+                f"[Debug] Memory history recording enabled — will record {self._memory_history_steps} training steps."
+            )
             torch.cuda.memory._record_memory_history(max_entries=1048576)
             _mem_recording = True
         # (B,)
@@ -149,12 +150,6 @@ class OnlineTrainer:
             # Step environments via the stepper (handles device transfers).
             trans, done = stepper.step(act.detach(), done.detach())
 
-            # Assign a new unique episode ID to every env that just finished so
-            # SliceSampler detects the boundary and never samples across it.
-            for _i in done.nonzero(as_tuple=False).squeeze(-1).tolist():
-                episode_ids[_i] = _next_episode_id
-                _next_episode_id += 1
-
             # Policy inference on GPU.
             # "agent_state" is reset by the agent based on the "is_first" flag in trans.
             # (B, A)
@@ -171,6 +166,16 @@ class OnlineTrainer:
                 video_cache.append(trans["image"][0])
             self.replay_buffer.add_transition(trans.detach())
             returns += trans["reward"][:, 0]
+
+            # Bump episode IDs AFTER storing the transition so the terminal
+            # row (is_last=True) keeps the OLD episode ID.  The new ID takes
+            # effect on the next iteration's row (the reset obs with
+            # is_first=True), which is where SliceSampler should see the
+            # trajectory boundary.
+            for _i in done.nonzero(as_tuple=False).squeeze(-1).tolist():
+                episode_ids[_i] = _next_episode_id
+                _next_episode_id += 1
+
             # Update models after enough data has accumulated
             if step // (stepper.env_num * self._action_repeat) > self.batch_length + 1:
                 if self._should_pretrain():
