@@ -318,7 +318,10 @@ class Dreamer(nn.Module):
 
     def update(self, replay_buffer):
         """Sample a batch from replay and perform one optimization step."""
-        data, index, initial = replay_buffer.sample()
+        sample = replay_buffer.sample()
+        if sample is None:
+            return {}  # skip this update – trajectories too short
+        data, index, initial = sample
         torch.compiler.cudagraph_mark_step_begin()
         p_data = self.preprocess(data)
         self._update_slow_target()

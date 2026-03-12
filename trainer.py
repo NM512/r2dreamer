@@ -202,8 +202,10 @@ class OnlineTrainer:
                         self.logger.scalar(f"train/{name}", value)
                     self.logger.scalar("train/opt/updates", update_count)
                     if self.video_pred_log:
-                        data, _, initial = self.replay_buffer.sample()
-                        self.logger.video("open_loop", tools.to_np(agent.video_pred(data, initial)))
+                        _sample = self.replay_buffer.sample()
+                        if _sample is not None:
+                            data, _, initial = _sample
+                            self.logger.video("open_loop", tools.to_np(agent.video_pred(data, initial)))
                     if self.params_hist_log:
                         for name, param in agent._named_params.items():
                             self.logger.histogram(name, tools.to_np(param))

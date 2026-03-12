@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 from torchrl.data.replay_buffers import LazyTensorStorage, ReplayBuffer
 from torchrl.data.replay_buffers.samplers import SliceSampler
@@ -25,7 +27,13 @@ class Buffer:
         self._buffer.extend(data.unsqueeze(1))
 
     def sample(self):
-        sample_td, info = self._buffer.sample(return_info=True)
+        try:
+            sample_td, info = self._buffer.sample(return_info=True)
+        except RuntimeError as e:
+            if "sufficient length" in str(e):
+                warnings.warn(f"Replay buffer sample skipped: {e}")
+                return None
+            raise
         # The sampler returns a flattened batch of length B*(T+1).
         # (B*(T+1), ...) -> (B, T+1, ...)
         sample_td = sample_td.view(-1, self.batch_length + 1)
