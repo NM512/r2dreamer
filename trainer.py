@@ -91,14 +91,24 @@ class OnlineTrainer:
         self.logger.write(train_step)
         agent.train()
 
-    def begin(self, agent):
+    def begin(self, agent, initial_step=0):
         """Main online training loop.
 
         Device handling is delegated to ``self.train_stepper``.
+
+        Args:
+            initial_step: Starting step count (used when resuming from checkpoint).
         """
         stepper = self.train_stepper
         video_cache = []
-        step = self.replay_buffer.count() * self._action_repeat
+        if initial_step > 0:
+            self._step = initial_step
+            # Advance Every counters so they don't all fire on the first step.
+            self._should_eval._last = self._step
+            self._should_log._last = self._step
+            self._updates_needed._last = self._step
+        else:
+            self._step = self.replay_buffer.count() * self._action_repeat
         update_count = 0
         # Debug: memory history snapshot
         _mem_recording = False
@@ -121,10 +131,10 @@ class OnlineTrainer:
         agent_state = agent.get_initial_state(stepper.env_num)
         # (B, A)
         act = agent_state["prev_action"].clone()
-        while step < self.steps:
+        while self._step < self.steps:
             # Evaluation
-            if self._should_eval(step) and self.eval_episode_num > 0:
-                self.eval(agent, step)
+            if self._should_eval(self._step) and self.eval_episode_num > 0:
+                self.eval(agent, self._step)
                 stepper.reset()
                 done = torch.ones(stepper.env_num, dtype=torch.bool, device=agent.device)
                 returns.zero_()
@@ -142,9 +152,9 @@ class OnlineTrainer:
                             video_cache = []
                         self.logger.scalar("episode/score", returns[i])
                         self.logger.scalar("episode/length", lengths[i])
-                        self.logger.write(step + i)  # to show all values on tensorboard
+                        self.logger.write(self._step + i)  # to show all values on tensorboard
                         returns[i] = lengths[i] = 0
-            step += stepper.count_active_steps(done) * self._action_repeat
+            self._step += stepper.count_active_steps(done) * self._action_repeat
             lengths += ~done
 
             # Step environments via the stepper (handles device transfers).
@@ -177,11 +187,11 @@ class OnlineTrainer:
                 _next_episode_id += 1
 
             # Update models after enough data has accumulated
-            if step // (stepper.env_num * self._action_repeat) > self.batch_length + 1:
+            if self._step // (stepper.env_num * self._action_repeat) > self.batch_length + 1:
                 if self._should_pretrain():
                     update_num = self.pretrain
                 else:
-                    update_num = self._updates_needed(step)
+                    update_num = self._updates_needed(self._step)
                 for _ in range(update_num):
                     _metrics = agent.update(self.replay_buffer)
                     train_metrics = _metrics
@@ -196,7 +206,7 @@ class OnlineTrainer:
                             print("[Debug] View it at: https://pytorch.org/memory_viz")
                 update_count += update_num
                 # Log training metrics
-                if self._should_log(step):
+                if self._should_log(self._step):
                     for name, value in train_metrics.items():
                         value = tools.to_np(value) if isinstance(value, torch.Tensor) else value
                         self.logger.scalar(f"train/{name}", value)
@@ -209,4 +219,4 @@ class OnlineTrainer:
                     if self.params_hist_log:
                         for name, param in agent._named_params.items():
                             self.logger.histogram(name, tools.to_np(param))
-                    self.logger.write(step, fps=True)
+                    self.logger.write(self._step, fps=True)
