@@ -3,7 +3,8 @@ import torch
 
 
 class OnlineTrainer:
-    def __init__(self, config, replay_buffer, logger, logdir, train_stepper, eval_stepper):
+    def __init__(self, config, replay_buffer, logger, logdir, train_stepper, eval_stepper,
+                 initial_step=0, save_fn=None):
         self.replay_buffer = replay_buffer
         self.logger = logger
         self.logdir = logdir
@@ -24,8 +25,19 @@ class OnlineTrainer:
         self._should_eval = tools.Every(self.eval_every)
         self._action_repeat = config.action_repeat
         # Periodic checkpointing
-        self._save_checkpoint_every = int(config.save_checkpoint_every)
-        self._should_save = tools.Every(self._save_checkpoint_every) if self._save_checkpoint_every > 0 else None
+        self._save_fn = save_fn
+        self._should_save = tools.Every(int(config.save_checkpoint_every)) if int(config.save_checkpoint_every) > 0 else None
+        # Resume state
+        if initial_step > 0:
+            self._step = initial_step
+            self._should_pretrain._once = False
+            self._should_eval._last = self._step
+            self._should_log._last = self._step
+            self._updates_needed._last = self._step
+            if self._should_save is not None:
+                self._should_save._last = self._step
+        else:
+            self._step = 0
         # Debug: memory profiling
         self._memory_history_snapshot = bool(config.memory_history_snapshot)
         self._memory_history_steps = int(config.memory_history_steps)
@@ -94,27 +106,14 @@ class OnlineTrainer:
         self.logger.write(train_step)
         agent.train()
 
-    def begin(self, agent, initial_step=0, save_fn=None):
+    def begin(self, agent):
         """Main online training loop.
 
         Device handling is delegated to ``self.train_stepper``.
-
-        Args:
-            initial_step: Starting step count (used when resuming from checkpoint).
-            save_fn: Optional callback ``save_fn(step)`` invoked periodically to
-                save a checkpoint.
         """
         stepper = self.train_stepper
         video_cache = []
-        if initial_step > 0:
-            self._step = initial_step
-            # Advance Every counters so they don't all fire on the first step.
-            self._should_eval._last = self._step
-            self._should_log._last = self._step
-            self._updates_needed._last = self._step
-            if self._should_save is not None:
-                self._should_save._last = self._step
-        else:
+        if self._step == 0:
             self._step = self.replay_buffer.count() * self._action_repeat
         update_count = 0
         # Debug: memory history snapshot
@@ -228,5 +227,5 @@ class OnlineTrainer:
                             self.logger.histogram(name, tools.to_np(param))
                     self.logger.write(self._step, fps=True)
             # Periodic checkpoint saving
-            if save_fn is not None and self._should_save is not None and self._should_save(self._step):
-                save_fn(self._step)
+            if self._save_fn is not None and self._should_save is not None and self._should_save(self._step):
+                self._save_fn(self._step)
