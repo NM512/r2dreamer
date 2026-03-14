@@ -23,6 +23,9 @@ class OnlineTrainer:
         self._should_log = tools.Every(config.update_log_every)
         self._should_eval = tools.Every(self.eval_every)
         self._action_repeat = config.action_repeat
+        # Periodic checkpointing
+        self._save_checkpoint_every = int(config.save_checkpoint_every)
+        self._should_save = tools.Every(self._save_checkpoint_every) if self._save_checkpoint_every > 0 else None
         # Debug: memory profiling
         self._memory_history_snapshot = bool(config.memory_history_snapshot)
         self._memory_history_steps = int(config.memory_history_steps)
@@ -91,13 +94,15 @@ class OnlineTrainer:
         self.logger.write(train_step)
         agent.train()
 
-    def begin(self, agent, initial_step=0):
+    def begin(self, agent, initial_step=0, save_fn=None):
         """Main online training loop.
 
         Device handling is delegated to ``self.train_stepper``.
 
         Args:
             initial_step: Starting step count (used when resuming from checkpoint).
+            save_fn: Optional callback ``save_fn(step)`` invoked periodically to
+                save a checkpoint.
         """
         stepper = self.train_stepper
         video_cache = []
@@ -107,6 +112,8 @@ class OnlineTrainer:
             self._should_eval._last = self._step
             self._should_log._last = self._step
             self._updates_needed._last = self._step
+            if self._should_save is not None:
+                self._should_save._last = self._step
         else:
             self._step = self.replay_buffer.count() * self._action_repeat
         update_count = 0
@@ -220,3 +227,6 @@ class OnlineTrainer:
                         for name, param in agent._named_params.items():
                             self.logger.histogram(name, tools.to_np(param))
                     self.logger.write(self._step, fps=True)
+            # Periodic checkpoint saving
+            if save_fn is not None and self._should_save is not None and self._should_save(self._step):
+                save_fn(self._step)

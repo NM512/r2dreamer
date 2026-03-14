@@ -36,5 +36,6 @@ trainer:
   params_hist_log: False
   update_log_every: 5e3
   action_repeat: ${env.action_repeat}
+  save_checkpoint_every: 0 # Save checkpoint every N steps (0 = only save at the end)
   memory_history_snapshot: False # Record full allocation trace for PyTorch Memory Visualizer
   memory_history_steps: 100     # Number of training steps to record before saving the snapshot
