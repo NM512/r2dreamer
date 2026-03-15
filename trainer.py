@@ -181,7 +181,7 @@ class OnlineTrainer:
                 _next_episode_id += 1
 
             # Update models after enough data has accumulated
-            if self._step // (stepper.env_num * self._action_repeat) > self.batch_length + 1:
+            if self.replay_buffer.count() // stepper.env_num > self.batch_length + 1:
                 if self._should_pretrain():
                     update_num = self.pretrain
                 else:

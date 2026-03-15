@@ -244,6 +244,39 @@ def run(config, build_env, simulation_app, vision=False):
         act_space,
     ).to(config.device)
 
+    # Resume from checkpoint if one exists in the logdir.
+    _resume_step = 0
+    checkpoint_path = logdir / "latest.pt"
+    if checkpoint_path.exists():
+        print(f"Resuming from checkpoint: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=config.device)
+        agent.load_state_dict(checkpoint["agent_state_dict"])
+        tools.recursively_load_optim_state_dict(agent, checkpoint["optims_state_dict"])
+        _resume_step = int(checkpoint.get("step", 0))
+        if "scheduler_state_dict" in checkpoint:
+            agent._scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        if "scaler_state_dict" in checkpoint:
+            agent._scaler.load_state_dict(checkpoint["scaler_state_dict"])
+        if "slow_value_updates" in checkpoint:
+            agent._slow_value_updates = checkpoint["slow_value_updates"]
+        if "ema_updates" in checkpoint and hasattr(agent, "_ema_updates"):
+            agent._ema_updates = checkpoint["ema_updates"]
+        print(f"  Restored agent weights, optimizer states, step={_resume_step}")
+
+    def _save_checkpoint(step):
+        items_to_save = {
+            "agent_state_dict": agent.state_dict(),
+            "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
+            "step": step,
+            "scheduler_state_dict": agent._scheduler.state_dict(),
+            "scaler_state_dict": agent._scaler.state_dict(),
+            "slow_value_updates": agent._slow_value_updates,
+            **({"ema_updates": agent._ema_updates} if hasattr(agent, "_ema_updates") else {}),
+        }
+        torch.save(items_to_save, logdir / f"checkpoint_{step}.pt")
+        torch.save(items_to_save, logdir / "latest.pt")
+        print(f"Checkpoint saved: checkpoint_{step}.pt + latest.pt")
+
     policy_trainer = OnlineTrainer(
         config.trainer,
         replay_buffer,
@@ -251,6 +284,8 @@ def run(config, build_env, simulation_app, vision=False):
         logdir,
         train_stepper=train_envs,
         eval_stepper=eval_envs,
+        initial_step=_resume_step,
+        save_fn=_save_checkpoint,
     )
 
     exit_code = 0
@@ -268,12 +303,7 @@ def run(config, build_env, simulation_app, vision=False):
         traceback.print_exc()
         exit_code = 1
     finally:
-        items_to_save = {
-            "agent_state_dict": agent.state_dict(),
-            "optims_state_dict": tools.recursively_collect_optim_state_dict(agent),
-        }
-        torch.save(items_to_save, logdir / "latest.pt")
-        print(f"Checkpoint saved to {logdir / 'latest.pt'}")
+        _save_checkpoint(policy_trainer._step)
 
         logger.close(exit_code=exit_code)
         vec_env._env.close()
