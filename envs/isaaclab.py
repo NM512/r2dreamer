@@ -21,9 +21,11 @@ IsaacLab auto-resets terminated/truncated envs *inside* its ``step()`` and
 returns the post-reset observation.  The true terminal obs and reward would
 be lost.
 
-This wrapper requires the inner env to be a ``KlaskRlDreamerEnv`` (or any
-``ManagerBasedRLEnv`` subclass that sets ``extras["terminal_obs"]`` and
-``extras["terminal_env_ids"]`` before the auto-reset).
+This wrapper requires the inner env to be an ``R2DreamerRLEnv``,
+``R2DreamerDirectRLEnv``, or any IsaacLab env subclass that sets
+``extras["terminal_obs"]`` and ``extras["terminal_env_ids"]`` before
+the auto-reset.  The ``make_isaac_env`` factory handles this
+automatically for both ManagerBased and Direct envs.
 
 On the step where an episode ends the wrapper:
   1. Swaps in the **terminal obs** (from ``extras``) for the done envs.
@@ -47,8 +49,7 @@ anyway.
 
 Usage::
 
-    isaac_env = gym.make("Isaac-Cartpole-Direct-v0", cfg=env_cfg)
-    vec_env = IsaacLabVecEnv(isaac_env.unwrapped)
+    vec_env = make_isaac_env("Isaac-Cartpole-v0", env_cfg)
     # vec_env now satisfies the ParallelEnv interface expected by OnlineTrainer.
 """
 
@@ -67,14 +68,16 @@ class IsaacLabVecEnv:
 
     The inner env **must** populate ``extras["terminal_obs"]`` and
     ``extras["terminal_env_ids"]`` so that the true terminal observation can
-    be returned on the step an episode ends.
+    be returned on the step an episode ends.  Both ``R2DreamerRLEnv``
+    (ManagerBased) and ``R2DreamerDirectRLEnv`` (Direct) provide this.
 
     Parameters
     ----------
     env:
-        An unwrapped IsaacLab ``ManagerBasedRLEnv`` subclass that captures
-        terminal observations before auto-reset (e.g.
-        ``KlaskRlDreamerEnv``).
+        An unwrapped IsaacLab env that captures terminal observations
+        before auto-reset (e.g. ``R2DreamerRLEnv``,
+        ``R2DreamerDirectRLEnv``, or any subclass that populates
+        ``extras["terminal_obs"]``).
     """
 
     def __init__(self, env, simulation_app=None):
@@ -175,8 +178,9 @@ class IsaacLabVecEnv:
         # ------------------------------------------------------------------
         # Swap in terminal observations for envs that just ended.
         #
-        # The inner env (KlaskRlDreamerEnv) captured obs *before* the auto-
-        # reset and placed them in extras["terminal_obs"].  IsaacLab's
+        # The inner env (R2DreamerRLEnv / R2DreamerDirectRLEnv) captured obs
+        # *before* the auto-reset and placed them in extras["terminal_obs"].
+        # IsaacLab's
         # obs_dict currently holds the post-reset obs for these envs —
         # replace them with the true terminal obs.
         # ------------------------------------------------------------------

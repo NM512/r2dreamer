@@ -269,8 +269,12 @@ def apply_dmc_cartpole_colors(env):
     sim_utils.bind_visual_material(f"{env0}/slider", deco_mat_path, stronger_than_descendants=True)
 
     # ---- dome light → DMC-like sky colour ----
+    # Direct envs spawn the light at /World/Light; ManagerBased scene configs
+    # create it at /World/DomeLight.  Try both paths so this works for either.
     stage = sim_utils.get_current_stage()
     light_prim = stage.GetPrimAtPath("/World/Light")
+    if not light_prim.IsValid():
+        light_prim = stage.GetPrimAtPath("/World/DomeLight")
     if light_prim.IsValid():
         from pxr import Gf
 
