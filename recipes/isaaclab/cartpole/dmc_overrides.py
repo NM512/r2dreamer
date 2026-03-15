@@ -2,22 +2,24 @@
 
 These functions adapt the stock IsaacLab cartpole task to match the
 DeepMind Control Suite cartpole as closely as possible, for benchmarking
-purposes.  They monkey-patch the env **before** it is wrapped by the
-generic ``IsaacLabVecEnv``.
+purposes.
 
-Overrides applied:
-  - Reward:       exact DMC balance (smooth) reward instead of the native one
-  - Observations: remap to DMC format (position=[cart_x, cos θ, sin θ],
-                  velocity=[cart_vel, pole_vel])
-  - Image source: read raw uint8 from tiled camera buffer (bypass env's
-                  normalisation that corrupts the uint8 preprocess)
-  - Termination:  suppress early terminations (time-only truncation, like DMC)
-  - Reset:        match DMC balance initial state distribution (cart pos,
-                  pole angle, velocities)
-  - Physics:      match DMC actuator damping at runtime (cart slider 5e-4,
-                  pole hinge ~0)
-  - Visuals:      match DMC scene colours for the RGB camera variant
+This module contains two kinds of overrides:
+
+  **Direct-env monkey patches** (applied before wrapping):
+    - ``patch_dmc_cartpole_reward`` — exact DMC balance (smooth) reward
+    - ``patch_dmc_cartpole_obs``    — DMC observation format
+    - ``patch_no_termination``      — time-only truncation (no early termination)
+    - ``patch_dmc_cartpole_reset``  — DMC initial state distribution
+    - ``apply_dmc_cartpole_colors`` — visual matching for RGB camera
+
+  **ManagerBased term functions** (used in config overrides):
+    - ``dmc_balance_reward``        — DMC reward term for RewardTermCfg
+    - ``dmc_cartpole_obs``          — DMC observation term for ObservationTermCfg
+    - ``reset_dmc_cartpole_state``  — DMC reset event term for EventTermCfg
 """
+
+from __future__ import annotations
 
 import math
 import types
@@ -86,7 +88,7 @@ def _compute_dmc_balance_reward(pole_angle, pole_ang_vel, cart_pos, action):
 
 
 # ---------------------------------------------------------------------------
-# Pre-construction env patches
+# Direct-env monkey patches
 # ---------------------------------------------------------------------------
 
 
@@ -119,7 +121,7 @@ def patch_dmc_cartpole_obs(env):
     """Monkey-patch the env to produce DMC-format observations.
 
     Replaces ``_get_observations()`` so that ``obs_dict["policy"]`` is a
-    5-D vector ``[cart_x, cos(θ), sin(θ), cart_vel, pole_vel]`` matching
+    5-D vector ``[cart_x, cos(theta), sin(theta), cart_vel, pole_vel]`` matching
     DMC's cartpole observation format.  Also patches
     ``single_observation_space`` to report the correct shape ``(5,)``.
 
@@ -140,7 +142,7 @@ def patch_dmc_cartpole_obs(env):
         pole_vel = self.joint_vel[:, self._pole_dof_idx[0]].unsqueeze(-1)
         cart_pos = self.joint_pos[:, self._cart_dof_idx[0]].unsqueeze(-1)
         cart_vel = self.joint_vel[:, self._cart_dof_idx[0]].unsqueeze(-1)
-        # DMC order: [cart_x, cos(θ), sin(θ), cart_vel, pole_vel]
+        # DMC order: [cart_x, cos(theta), sin(theta), cart_vel, pole_vel]
         obs = torch.cat(
             [cart_pos, torch.cos(pole_angle), torch.sin(pole_angle), cart_vel, pole_vel],
             dim=-1,
@@ -191,7 +193,7 @@ def patch_dmc_cartpole_reset(env):
 
     The stock IsaacLab cartpole uses:
       - cart position:  0
-      - pole angle:     Uniform(-0.25π, 0.25π) ≈ ±45°
+      - pole angle:     Uniform(-0.25pi, 0.25pi) ~ +/-45 deg
       - velocities:     0
 
     This patch replaces the reset to match DMC exactly.
@@ -243,12 +245,12 @@ def apply_dmc_cartpole_colors(env):
 
     Must be called after the scene has been created and the simulation
     has been started (i.e. after ``gym.make``). Only touches env_0's
-    prims — replicate_physics mirrors them to all other envs.
+    prims -- replicate_physics mirrors them to all other envs.
 
     DMC cartpole colours (linear RGB):
       - cart & pole ("self" material):     (0.89, 0.65, 0.41)  warm brown
       - slider / rail ("decoration"):      (0.24, 0.47, 0.61)  steel blue
-      - dome light → approximate sky:      (0.18, 0.28, 0.37)  blue sky
+      - dome light -> approximate sky:     (0.18, 0.28, 0.37)  blue sky
       - ground plane:                      (0.04, 0.20, 0.31) dark blue-grey
     """
     import isaaclab.sim as sim_utils
@@ -268,7 +270,7 @@ def apply_dmc_cartpole_colors(env):
         sim_utils.bind_visual_material(f"{env0}/{part}", self_mat_path, stronger_than_descendants=True)
     sim_utils.bind_visual_material(f"{env0}/slider", deco_mat_path, stronger_than_descendants=True)
 
-    # ---- dome light → DMC-like sky colour ----
+    # ---- dome light -> DMC-like sky colour ----
     # Direct envs spawn the light at /World/Light; ManagerBased scene configs
     # create it at /World/DomeLight.  Try both paths so this works for either.
     stage = sim_utils.get_current_stage()
@@ -305,3 +307,115 @@ def apply_dmc_cartpole_colors(env):
         ground_cfg,
         translation=(0.0, 0.0, -0.005),
     )
+
+
+# ---------------------------------------------------------------------------
+# ManagerBased term functions
+# ---------------------------------------------------------------------------
+
+
+def dmc_balance_reward(
+    env,
+    asset_cfg,
+    action_repeat: int,
+) -> torch.Tensor:
+    """DMC cartpole balance (smooth) reward for ManagerBased envs.
+
+    Returns a per-env reward tensor of shape ``(num_envs,)``.
+
+    The reward manager multiplies every term by ``dt`` (= ``step_dt``).
+    The Direct env returns ``reward * action_repeat`` directly from
+    ``_get_rewards()``.  To produce the same per-step total we return
+    ``reward * action_repeat / step_dt`` so that after the ``* dt``
+    multiplication the result is ``reward * action_repeat``.
+
+    Config usage::
+
+        RewTerm(func=dmc_balance_reward, weight=1.0, params={
+            "asset_cfg": SceneEntityCfg("robot",
+                joint_names=["slider_to_cart", "cart_to_pole"]),
+            "action_repeat": 2,
+        })
+    """
+    asset = env.scene[asset_cfg.name]
+    # joint_ids may be a slice when joints are contiguous; index the data
+    # first, then pick columns by position (0=cart, 1=pole).
+    jpos = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    jvel = asset.data.joint_vel[:, asset_cfg.joint_ids]
+    cart_pos = jpos[:, 0]
+    pole_angle = jpos[:, 1]
+    pole_ang_vel = jvel[:, 1]
+    # action_manager.action is the raw policy output (before the
+    # JointEffortAction term scales it by action_scale).  This is
+    # already in [-1, 1] -- no need to divide by action_scale.
+    raw_action = env.action_manager.action[:, 0]
+    reward = _compute_dmc_balance_reward(pole_angle, pole_ang_vel, cart_pos, raw_action)
+    # Compensate for the reward manager's ``* dt`` so the per-step
+    # total matches the Direct env: reward * action_repeat.
+    return reward * action_repeat / env.step_dt
+
+
+def dmc_cartpole_obs(
+    env,
+    asset_cfg,
+) -> torch.Tensor:
+    """DMC-format cartpole observation: ``[cart_x, cos(theta), sin(theta), cart_vel, pole_vel]``.
+
+    Returns a tensor of shape ``(num_envs, 5)``.
+
+    Config usage::
+
+        ObsTerm(func=dmc_cartpole_obs, params={
+            "asset_cfg": SceneEntityCfg("robot",
+                joint_names=["slider_to_cart", "cart_to_pole"]),
+        })
+    """
+    asset = env.scene[asset_cfg.name]
+    jpos = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    jvel = asset.data.joint_vel[:, asset_cfg.joint_ids]
+    cart_pos = jpos[:, 0:1]
+    pole_angle = jpos[:, 1:2]
+    cart_vel = jvel[:, 0:1]
+    pole_vel = jvel[:, 1:2]
+    return torch.cat(
+        [cart_pos, torch.cos(pole_angle), torch.sin(pole_angle), cart_vel, pole_vel],
+        dim=-1,
+    )
+
+
+def reset_dmc_cartpole_state(
+    env,
+    env_ids: torch.Tensor,
+    asset_cfg,
+) -> None:
+    """Reset cartpole joints to the DMC balance initial-state distribution.
+
+    DMC ``Balance(swing_up=False)`` initialises each episode as:
+      - cart position:  ``Uniform(-0.1, 0.1)``
+      - pole angle:     ``Uniform(-0.034, 0.034)`` rad (near-vertical)
+      - cart velocity:  ``Normal(0, 0.01)``
+      - pole velocity:  ``Normal(0, 0.01)``
+
+    Config usage::
+
+        EventTerm(func=reset_dmc_cartpole_state, mode="reset", params={
+            "asset_cfg": SceneEntityCfg("robot",
+                joint_names=["slider_to_cart", "cart_to_pole"]),
+        })
+    """
+    asset = env.scene[asset_cfg.name]
+    joint_pos = asset.data.default_joint_pos[env_ids].clone()
+    joint_vel = asset.data.default_joint_vel[env_ids].clone()
+    n = len(env_ids)
+    device = env.device
+
+    # Cart position: Uniform(-0.1, 0.1)
+    joint_pos[:, 0] = torch.rand(n, device=device) * 0.2 - 0.1
+    # Pole angle: Uniform(-0.034, 0.034) rad
+    joint_pos[:, 1] = torch.rand(n, device=device) * 0.068 - 0.034
+    # Cart velocity: Normal(0, 0.01)
+    joint_vel[:, 0] = torch.randn(n, device=device) * 0.01
+    # Pole velocity: Normal(0, 0.01)
+    joint_vel[:, 1] = torch.randn(n, device=device) * 0.01
+
+    asset.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
