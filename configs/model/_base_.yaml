@@ -5,7 +5,6 @@ horizon: 333
 lamb: 0.95
 compile: True
 log_grads: False
-memory_peak_tracking: False # Log per-section GPU peak memory as scalars
 device: ${device}
 rep_loss: "r2dreamer" # r2dreamer/dreamer/infonce/dreamerpro
 
