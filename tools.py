@@ -2,6 +2,7 @@ import io
 import json
 import os
 import random
+import re
 import time
 from abc import ABC, abstractmethod
 
@@ -39,6 +40,87 @@ class Tee(io.TextIOBase):
         return any(hasattr(stream, "isatty") and stream.isatty() for stream in self._streams)
 
 
+class AnsiFilter(io.TextIOBase):
+    """Wraps a file stream, stripping ANSI escape codes and resolving
+    terminal cursor animations (e.g. progress spinners).
+
+    Handles cursor-up (\\x1b[A) + erase-line (\\x1b[2K) sequences so that
+    animated output is collapsed to the final frame only.
+    """
+
+    _ANSI_SEQ = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+    def __init__(self, stream):
+        super().__init__()
+        self._stream = stream
+        self._pending = []  # completed lines not yet written to file
+        self._partial = ""  # current incomplete line (no trailing \n yet)
+
+    def write(self, s):
+        n = len(s)
+        # Prepend any leftover partial text so split sequences are handled.
+        data = self._partial + s
+        self._partial = ""
+
+        pos = 0
+        for m in self._ANSI_SEQ.finditer(data):
+            start, end = m.span()
+            self._emit_text(data[pos:start])
+            pos = end
+
+            cmd = m.group()[-1]
+            param = m.group()[2:-1]
+
+            if cmd == "A":  # Cursor Up
+                count = int(param) if param else 1
+                for _ in range(count):
+                    if self._pending:
+                        self._pending.pop()
+            elif cmd == "K":  # Erase Line
+                self._partial = ""
+            # All other sequences (colors, bold, …) are simply dropped.
+
+        self._emit_text(data[pos:])
+        self._flush_completed()
+        return n
+
+    def _emit_text(self, text):
+        """Process plain text (no ANSI sequences), splitting on newlines."""
+        if not text:
+            return
+        parts = text.split("\n")
+        self._partial += parts[0]
+        for p in parts[1:]:
+            self._pending.append(self._resolve_cr(self._partial))
+            self._partial = p
+
+    @staticmethod
+    def _resolve_cr(line):
+        """Handle \\r: keep only the text after the last carriage return."""
+        if "\r" in line:
+            return line.rsplit("\r", 1)[-1]
+        return line
+
+    def _flush_completed(self):
+        """Write completed lines, keeping the last one buffered for cursor-up."""
+        while len(self._pending) > 1:
+            self._stream.write(self._pending.pop(0) + "\n")
+
+    def flush(self):
+        for line in self._pending:
+            self._stream.write(line + "\n")
+        self._pending.clear()
+        if self._partial:
+            self._stream.write(self._resolve_cr(self._partial))
+            self._partial = ""
+        self._stream.flush()
+
+    def close(self):
+        self.flush()
+        self._stream.close()
+        super().close()
+
+
 def setup_console_log(logdir, filename="console.log"):
     """Mirror stdout/stderr to a file under logdir.
 
@@ -55,9 +137,10 @@ def setup_console_log(logdir, filename="console.log"):
     # Line-buffered text file for timely flushing.
     path = logdir / filename
     f = path.open("a", buffering=1)
-    sys.stdout = Tee(sys.stdout, f)
-    sys.stderr = Tee(sys.stderr, f)
-    return f
+    filtered = AnsiFilter(f)
+    sys.stdout = Tee(sys.stdout, filtered)
+    sys.stderr = Tee(sys.stderr, filtered)
+    return filtered
 
 
 def to_np(x):
@@ -409,7 +492,7 @@ class WandbBackend(LoggerBackend):
         self._wandb.config.update(hparams, allow_val_change=True)
 
     def flush(self):
-        self._wandb.log({}, commit=True)  # TODO: is this needed?
+        self._wandb.log({}, commit=True)
 
     def close(self, exit_code=0):
         self._wandb.finish(exit_code=exit_code)
