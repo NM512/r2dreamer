@@ -81,62 +81,28 @@ def make_env(config, id):
     return wrappers.Dtype(env)
 
 
-def make_isaac_env(gym_id, env_cfg, render_mode=None, pre_wrap_fns=(), post_create_fn=None, simulation_app=None):
-    """Construct a GPU-resident IsaacLab env wrapped as an ``IsaacLabVecEnv``.
+def make_isaac_env(unwrapped, pre_wrap_fns=(), post_create_fn=None, simulation_app=None):
+    """Wrap an already-constructed IsaacLab env as an ``IsaacLabVecEnv``.
 
-    This function is intentionally generic — it knows nothing about specific
-    tasks.  All task-specific knowledge (gym_id, env_cfg construction, patch
-    functions) belongs in the caller (e.g. ``train_isaaclab.py``).
-
-    For **ManagerBased** envs the factory instantiates ``R2DreamerRLEnv``
-    directly (bypassing ``gym.make``, which would create a plain
-    ``ManagerBasedRLEnv`` without terminal-obs capture).
-
-    For **Direct** envs the factory uses ``gym.make`` and then inserts
-    ``R2DreamerDirectRLEnv`` into the instance's class hierarchy so that
-    ``super()`` resolves correctly through the MRO.
+    The caller is responsible for constructing the unwrapped env — either by
+    instantiating ``R2DreamerRLEnv`` directly (ManagerBased) or by using
+    ``gym.make`` and patching (third-party Direct envs).  For your own Direct
+    envs, simply inherit from ``R2DreamerDirectRLEnv`` in the task definition
+    and instantiate directly — no patching needed.
 
     Parameters
     ----------
-    gym_id:
-        Gymnasium env ID string (e.g. ``"Isaac-Cartpole-v0"`` or
-        ``"Isaac-Cartpole-Direct-v0"``).
-    env_cfg:
-        A fully configured IsaacLab ``EnvCfg`` instance.
-    render_mode:
-        ``"rgb_array"`` for vision tasks, ``None`` for proprio-only.
+    unwrapped:
+        A fully constructed IsaacLab env instance (``R2DreamerRLEnv``,
+        ``R2DreamerDirectRLEnv``, or a subclass of either).
     pre_wrap_fns:
         Callables ``fn(unwrapped_env)`` applied to the unwrapped env
-        before wrapping (e.g. reward/obs/termination patches).  Note: callers
-        that don't need ``config`` can use ``functools.partial`` to pre-bind it.
+        before wrapping (e.g. reward/obs/termination patches).
     post_create_fn:
-        Optional callable ``fn(unwrapped_env)`` applied after env creation
+        Optional callable ``fn(unwrapped_env)`` applied after pre_wrap_fns
         (e.g. scene colour overrides that require the sim to be running).
     """
-    import gymnasium as gym
-
-    from envs.isaaclab import IsaacLabVecEnv
-    from envs.r2dreamer_rl_env import R2DreamerDirectRLEnv, R2DreamerRLEnv
-
-    spec = gym.spec(gym_id)
-    is_manager_based = "ManagerBasedRLEnv" in str(spec.entry_point)
-
-    if is_manager_based:
-        # Instantiate R2DreamerRLEnv directly so terminal obs are captured.
-        unwrapped = R2DreamerRLEnv(cfg=env_cfg, render_mode=render_mode)
-    else:
-        # Direct env — create via gym.make, then inject R2DreamerDirectRLEnv
-        # into the class hierarchy so step()/reset_idx() capture terminal obs
-        # and super() resolves correctly through the MRO.
-        isaac_env = gym.make(gym_id, cfg=env_cfg, render_mode=render_mode)
-        unwrapped = isaac_env.unwrapped
-        ConcreteClass = type(unwrapped)
-        PatchedClass = type(
-            f"R2Dreamer{ConcreteClass.__name__}",
-            (R2DreamerDirectRLEnv, ConcreteClass),
-            {},
-        )
-        unwrapped.__class__ = PatchedClass
+    from envs.isaaclab import IsaacLabVecEnv, R2DreamerDirectRLEnv, R2DreamerRLEnv
 
     assert isinstance(
         unwrapped, (R2DreamerRLEnv, R2DreamerDirectRLEnv)

@@ -111,6 +111,7 @@ import tools
 from buffer import Buffer
 from dreamer import Dreamer
 from envs import make_envs, make_isaac_env
+from envs.isaaclab import R2DreamerDirectRLEnv, R2DreamerRLEnv
 from trainer import OnlineTrainer
 
 # =============================================================================
@@ -371,8 +372,28 @@ TASK_BUILDERS = {
 }
 
 
+def _patch_direct_env(unwrapped):
+    """Inject ``R2DreamerDirectRLEnv`` into a third-party Direct env's MRO.
+
+    Use this for Direct envs created via ``gym.make`` whose class you don't
+    control (e.g. IsaacLab's built-in cartpole).  For your own Direct envs,
+    inherit from ``R2DreamerDirectRLEnv`` directly instead.
+    """
+    ConcreteClass = type(unwrapped)
+    PatchedClass = type(
+        f"R2Dreamer{ConcreteClass.__name__}",
+        (R2DreamerDirectRLEnv, ConcreteClass),
+        {},
+    )
+    unwrapped.__class__ = PatchedClass
+
+
 def _make_env(config, gym_id, render_mode=None, pre_wrap_fns=(), post_create_fn=None, env_cfg_fn=None):
     """Generic helper to construct a GPU-resident IsaacLab env.
+
+    For **ManagerBased** envs, instantiates ``R2DreamerRLEnv`` directly.
+    For **Direct** (third-party) envs, uses ``gym.make`` then patches the
+    class hierarchy to inject ``R2DreamerDirectRLEnv``.
 
     Args:
         config: Hydra env config with env_num, action_repeat, seed, etc.
@@ -388,7 +409,8 @@ def _make_env(config, gym_id, render_mode=None, pre_wrap_fns=(), post_create_fn=
 
     import gymnasium as gym
 
-    env_cfg_entry = gym.spec(gym_id).kwargs["env_cfg_entry_point"]
+    spec = gym.spec(gym_id)
+    env_cfg_entry = spec.kwargs["env_cfg_entry_point"]
     if isinstance(env_cfg_entry, str):
         module_name, class_name = env_cfg_entry.rsplit(":", 1)
         env_cfg_class = getattr(importlib.import_module(module_name), class_name)
@@ -432,10 +454,18 @@ def _make_env(config, gym_id, render_mode=None, pre_wrap_fns=(), post_create_fn=
     if env_cfg_fn is not None:
         env_cfg_fn(env_cfg)
 
+    # Construct the unwrapped env with terminal-obs capture.
+    is_manager_based = "ManagerBasedRLEnv" in str(spec.entry_point)
+    if is_manager_based:
+        unwrapped = R2DreamerRLEnv(cfg=env_cfg, render_mode=render_mode)
+    else:
+        # Third-party Direct env — create via gym.make, then patch.
+        isaac_env = gym.make(gym_id, cfg=env_cfg, render_mode=render_mode)
+        unwrapped = isaac_env.unwrapped
+        _patch_direct_env(unwrapped)
+
     return make_isaac_env(
-        gym_id=gym_id,
-        env_cfg=env_cfg,
-        render_mode=render_mode,
+        unwrapped,
         pre_wrap_fns=pre_wrap_fns,
         post_create_fn=post_create_fn,
         simulation_app=simulation_app,

@@ -24,8 +24,7 @@ be lost.
 This wrapper requires the inner env to be an ``R2DreamerRLEnv``,
 ``R2DreamerDirectRLEnv``, or any IsaacLab env subclass that sets
 ``extras["terminal_obs"]`` and ``extras["terminal_env_ids"]`` before
-the auto-reset.  The ``make_isaac_env`` factory handles this
-automatically for both ManagerBased and Direct envs.
+the auto-reset.  Both classes are defined below.
 
 On the step where an episode ends the wrapper:
   1. Swaps in the **terminal obs** (from ``extras``) for the done envs.
@@ -49,14 +48,91 @@ anyway.
 
 Usage::
 
-    vec_env = make_isaac_env("Isaac-Cartpole-v0", env_cfg)
+    vec_env = make_isaac_env(unwrapped_env)
     # vec_env now satisfies the ParallelEnv interface expected by OnlineTrainer.
 """
+
+from __future__ import annotations
+
+from typing import Sequence
 
 import gymnasium as gym
 import numpy as np
 import torch
+from isaaclab.envs import DirectRLEnv, ManagerBasedRLEnv
+from isaaclab.envs.common import VecEnvStepReturn
 from tensordict import TensorDict
+
+
+# =============================================================================
+# Terminal-observation capture subclasses
+# =============================================================================
+#
+# IsaacLab's step() auto-resets terminated envs *before* computing the final
+# observations, so the true terminal obs is lost.  These subclasses override
+# ``_reset_idx`` to capture observations **before** the reset, storing them in
+# ``self.extras["terminal_obs"]``.  The downstream ``IsaacLabVecEnv`` wrapper
+# swaps them in on the step an episode ends.
+#
+# The override is intentionally minimal (~10 lines per class) to stay resilient
+# to base-class changes across IsaacLab versions.
+#
+# For your own tasks, inherit from ``R2DreamerRLEnv`` (ManagerBased) or
+# ``R2DreamerDirectRLEnv`` (Direct) directly in the task definition.  For
+# third-party Direct envs that you can't modify, see ``_patch_direct_env``
+# in ``train_isaaclab.py`` which dynamically injects ``R2DreamerDirectRLEnv``
+# into the class hierarchy.
+
+
+class R2DreamerRLEnv(ManagerBasedRLEnv):
+    """ManagerBasedRLEnv with pre-reset terminal observation capture."""
+
+    def step(self, action: torch.Tensor) -> VecEnvStepReturn:
+        # Clear stale terminal obs from the previous step so the wrapper
+        # doesn't see data from a step where no envs terminated.
+        self.extras.pop("terminal_obs", None)
+        self.extras.pop("terminal_env_ids", None)
+        return super().step(action)
+
+    def _reset_idx(self, env_ids: Sequence[int]):
+        # Capture observations BEFORE the reset so the wrapper can return
+        # the true terminal obs to the agent.
+        if len(env_ids) > 0:
+            terminal_obs = self.observation_manager.compute()
+            self.extras["terminal_obs"] = {
+                key: val[env_ids].clone() for key, val in terminal_obs.items()
+            }
+            self.extras["terminal_env_ids"] = env_ids
+        super()._reset_idx(env_ids)
+
+
+class R2DreamerDirectRLEnv(DirectRLEnv):
+    """DirectRLEnv with pre-reset terminal observation capture.
+
+    For your own Direct envs, inherit from this class directly in the task
+    definition.  For third-party Direct envs created via ``gym.make``, use
+    ``_patch_direct_env`` in ``train_isaaclab.py`` to inject this class
+    into the instance's MRO.
+    """
+
+    def step(self, action: torch.Tensor) -> VecEnvStepReturn:
+        self.extras.pop("terminal_obs", None)
+        self.extras.pop("terminal_env_ids", None)
+        return super().step(action)
+
+    def _reset_idx(self, env_ids: Sequence[int]):
+        if len(env_ids) > 0:
+            terminal_obs = self._get_observations()
+            self.extras["terminal_obs"] = {
+                key: val[env_ids].clone() for key, val in terminal_obs.items()
+            }
+            self.extras["terminal_env_ids"] = env_ids
+        super()._reset_idx(env_ids)
+
+
+# =============================================================================
+# Vectorized wrapper
+# =============================================================================
 
 
 class IsaacLabVecEnv:
