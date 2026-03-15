@@ -475,9 +475,11 @@ class WandbBackend(LoggerBackend):
         name = name if isinstance(name, str) else name.decode("utf-8")
         if np.issubdtype(value.dtype, np.floating):
             value = np.clip(255 * value, 0, 255).astype(np.uint8)
-        # Log first batch element; wandb expects (T, C, H, W)
+        # Tile all batch elements side-by-side; wandb expects (T, C, H, W)
+        B, T, H, W, C = value.shape
+        value = value.transpose(1, 4, 2, 0, 3).reshape((T, C, H, B * W))
         self._wandb.log(
-            {name: self._wandb.Video(value[0].transpose(0, 3, 1, 2), fps=16, format="gif")},
+            {name: self._wandb.Video(value, fps=16, format="gif")},
             step=step,
         )
 
