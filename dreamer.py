@@ -158,9 +158,8 @@ class Dreamer(nn.Module):
 
         self.train()
         self.clone_and_freeze()
-        if config.compile:
-            print("Compiling update function with torch.compile...")
-            self._cal_grad = torch.compile(self._cal_grad, mode="reduce-overhead")
+        self._compile = config.compile
+        self._compiled = False
 
     def _update_slow_target(self):
         """Update slow-moving value target network."""
@@ -317,6 +316,10 @@ class Dreamer(nn.Module):
 
     def update(self, replay_buffer):
         """Sample a batch from replay and perform one optimization step."""
+        if self._compile and not self._compiled:
+            print("Compiling update function with torch.compile...")
+            self._cal_grad = torch.compile(self._cal_grad, mode="reduce-overhead")
+            self._compiled = True
         sample = replay_buffer.sample()
         if sample is None:
             return {}  # skip this update – trajectories too short
