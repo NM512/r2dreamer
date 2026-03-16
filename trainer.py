@@ -32,7 +32,7 @@ class OnlineTrainer:
             self._step = initial_step
             self._should_pretrain._once = False
             self._should_eval._last = self._step
-            self._should_log._last = self._step
+            self._should_log._last = self._step + self._action_repeat
             self._updates_needed._last = self._step
             if self._should_save is not None:
                 self._should_save._last = self._step
@@ -122,6 +122,7 @@ class OnlineTrainer:
         # resets so SliceSampler never samples across episode boundaries.
         _next_episode_id = stepper.env_num
         train_metrics = {}
+        stepper.reset()
         agent_state = agent.get_initial_state(stepper.env_num)
         # (B, A)
         act = agent_state["prev_action"].clone()
