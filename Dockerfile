@@ -15,7 +15,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Create an ICD config file to register the NVIDIA EGL implementation with glvnd. 
+# Create an ICD config file to register the NVIDIA EGL implementation with glvnd.
 RUN mkdir -p /usr/share/glvnd/egl_vendor.d && \
     echo '{"file_format_version":"1.0.0","ICD":{"library_path":"libEGL_nvidia.so.0"}}' \
     > /usr/share/glvnd/egl_vendor.d/10_nvidia.json

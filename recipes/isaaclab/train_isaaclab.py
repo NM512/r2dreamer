@@ -2,7 +2,7 @@
 
 This script is a **template** showing the exact pattern to follow when
 training r2dreamer on any IsaacLab task. See the /docs/isaaclab.md guide
-for detailed instructions on how to use and customize this script for 
+for detailed instructions on how to use and customize this script for
 your own IsaacLab training runs.
 """
 
@@ -63,6 +63,7 @@ torch.set_float32_matmul_precision("high")
 
 # Register IsaacLab task environments (triggers gymnasium gym.register calls).
 import isaaclab_tasks  # noqa: F401
+
 import tools
 from buffer import Buffer
 from dreamer import Dreamer

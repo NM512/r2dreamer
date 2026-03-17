@@ -1,8 +1,8 @@
 """Cartpole benchmark entry-point for r2dreamer + IsaacLab.
 
 This script trains r2dreamer on one of four IsaacLab cartpole variants,
-serving as a reproducible benchmark and sanity check. 
-See the /docs/isaaclab.md guide for detailed instructions on how to 
+serving as a reproducible benchmark and sanity check.
+See the /docs/isaaclab.md guide for detailed instructions on how to
 run these examples.
 """
 
@@ -38,9 +38,9 @@ simulation_app = app_launcher.app
 # Phase 2: Everything else -- safe to import now that the sim is running.
 # =============================================================================
 
-_this_dir = pathlib.Path(__file__).parent                   # recipes/isaaclab/cartpole/
-_recipe_dir = _this_dir.parent                              # recipes/isaaclab/
-_r2dreamer_root = _recipe_dir.parent.parent                 # r2dreamer/
+_this_dir = pathlib.Path(__file__).parent  # recipes/isaaclab/cartpole/
+_recipe_dir = _this_dir.parent  # recipes/isaaclab/
+_r2dreamer_root = _recipe_dir.parent.parent  # r2dreamer/
 sys.path.insert(0, str(_r2dreamer_root))
 sys.path.insert(0, str(_recipe_dir))
 
@@ -57,10 +57,7 @@ def _cartpole_build_env(env_config, vision, simulation_app):
     task_name = env_config.task.split("_", 1)[1]
     builder = CARTPOLE_TASK_BUILDERS.get(task_name)
     if builder is None:
-        raise ValueError(
-            f"Unknown cartpole task: {task_name!r}. "
-            f"Available: {list(CARTPOLE_TASK_BUILDERS)}"
-        )
+        raise ValueError(f"Unknown cartpole task: {task_name!r}. Available: {list(CARTPOLE_TASK_BUILDERS)}")
     return builder(env_config, vision, simulation_app)
 
 

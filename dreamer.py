@@ -310,7 +310,7 @@ class Dreamer(nn.Module):
         else:
             model = recon[:, :context_len]
 
-        truth = data["image"][:B, :model.shape[1]]
+        truth = data["image"][:B, : model.shape[1]]
         error = (model - truth + 1.0) / 2.0
         return torch.cat([truth, model, error], 2)
 

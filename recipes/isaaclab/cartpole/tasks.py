@@ -18,7 +18,6 @@ import functools
 
 import train_isaaclab
 
-
 # Known shorthand tasks.
 # Maps shorthand -> {vision: gym_id, proprio: gym_id}.
 KNOWN_TASKS = {
@@ -155,12 +154,17 @@ def _build_cartpole_env(config, vision, simulation_app):
 
     env_cfg_fns = []
     if vision:
-        env_cfg_fns.append(functools.partial(
-            _cartpole_camera_cfg, height=config.size[0], width=config.size[1],
-        ))
+        env_cfg_fns.append(
+            functools.partial(
+                _cartpole_camera_cfg,
+                height=config.size[0],
+                width=config.size[1],
+            )
+        )
         env_cfg_fns.append(_cartpole_dreamer_vision_cfg_overrides)
 
     return _make_env(config, gym_id, render_mode, simulation_app, env_cfg_fns=env_cfg_fns)
+
 
 def _build_cartpole_direct_env(config, vision, simulation_app):
     """Build a Direct cartpole env (stock IsaacLab behaviour)."""
@@ -170,9 +174,13 @@ def _build_cartpole_direct_env(config, vision, simulation_app):
 
     env_cfg_fns = []
     if vision:
-        env_cfg_fns.append(functools.partial(
-            _cartpole_camera_cfg, height=config.size[0], width=config.size[1],
-        ))
+        env_cfg_fns.append(
+            functools.partial(
+                _cartpole_camera_cfg,
+                height=config.size[0],
+                width=config.size[1],
+            )
+        )
 
     return _make_env(config, gym_id, render_mode, simulation_app, env_cfg_fns=env_cfg_fns)
 
@@ -202,9 +210,13 @@ def _build_cartpole_direct_dmc_env(config, vision, simulation_app):
 
     env_cfg_fns = []
     if vision:
-        env_cfg_fns.append(functools.partial(
-            _cartpole_camera_cfg, height=config.size[0], width=config.size[1],
-        ))
+        env_cfg_fns.append(
+            functools.partial(
+                _cartpole_camera_cfg,
+                height=config.size[0],
+                width=config.size[1],
+            )
+        )
 
     return _make_env(
         config,
@@ -227,14 +239,20 @@ def _build_cartpole_dmc_env(config, vision, simulation_app):
 
     env_cfg_fns = []
     if vision:
-        env_cfg_fns.append(functools.partial(
-            _cartpole_camera_cfg, height=config.size[0], width=config.size[1],
-        ))
-    env_cfg_fns.append(functools.partial(
-        _cartpole_dmc_cfg_overrides,
-        vision=vision,
-        action_repeat=int(config.action_repeat),
-    ))
+        env_cfg_fns.append(
+            functools.partial(
+                _cartpole_camera_cfg,
+                height=config.size[0],
+                width=config.size[1],
+            )
+        )
+    env_cfg_fns.append(
+        functools.partial(
+            _cartpole_dmc_cfg_overrides,
+            vision=vision,
+            action_repeat=int(config.action_repeat),
+        )
+    )
 
     return _make_env(
         config,
@@ -258,6 +276,11 @@ def _cartpole_dmc_cfg_overrides(env_cfg, vision, action_repeat):
     so that a stock ManagerBased cartpole produces the exact same behaviour
     as the DMC cartpole balance task.
     """
+    from cartpole.dmc_overrides import (
+        dmc_balance_reward,
+        dmc_cartpole_obs,
+        reset_dmc_cartpole_state,
+    )
     from isaaclab.managers import EventTermCfg as EventTerm
     from isaaclab.managers import ObservationGroupCfg as ObsGroup
     from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -265,10 +288,10 @@ def _cartpole_dmc_cfg_overrides(env_cfg, vision, action_repeat):
     from isaaclab.managers import SceneEntityCfg
     from isaaclab.managers import TerminationTermCfg as DoneTerm
     from isaaclab.utils import configclass
-
-    from cartpole.dmc_overrides import dmc_balance_reward, dmc_cartpole_obs, reset_dmc_cartpole_state
     from isaaclab_tasks.manager_based.classic.cartpole.mdp import image as _image_fn
-    from isaaclab_tasks.manager_based.classic.cartpole.mdp import time_out as _time_out_fn
+    from isaaclab_tasks.manager_based.classic.cartpole.mdp import (
+        time_out as _time_out_fn,
+    )
 
     _robot_cfg = SceneEntityCfg("robot", joint_names=["slider_to_cart", "cart_to_pole"])
 
@@ -362,9 +385,11 @@ def _cartpole_dreamer_vision_cfg_overrides(env_cfg):
     from isaaclab.managers import ObservationTermCfg as ObsTerm
     from isaaclab.managers import SceneEntityCfg
     from isaaclab.utils import configclass
-
     from isaaclab_tasks.manager_based.classic.cartpole.mdp import image as _image_fn
-    from isaaclab_tasks.manager_based.classic.cartpole.mdp import joint_pos_rel, joint_vel_rel
+    from isaaclab_tasks.manager_based.classic.cartpole.mdp import (
+        joint_pos_rel,
+        joint_vel_rel,
+    )
 
     @configclass
     class _PolicyObs(ObsGroup):

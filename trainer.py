@@ -1,10 +1,12 @@
-import tools
 import torch
+
+import tools
 
 
 class OnlineTrainer:
-    def __init__(self, config, replay_buffer, logger, logdir, train_stepper, eval_stepper,
-                 initial_step=0, save_fn=None):
+    def __init__(
+        self, config, replay_buffer, logger, logdir, train_stepper, eval_stepper, initial_step=0, save_fn=None
+    ):
         self.replay_buffer = replay_buffer
         self.logger = logger
         self.logdir = logdir
@@ -26,7 +28,9 @@ class OnlineTrainer:
         self._action_repeat = config.action_repeat
         # Periodic checkpointing
         self._save_fn = save_fn
-        self._should_save = tools.Every(int(config.save_checkpoint_every)) if int(config.save_checkpoint_every) > 0 else None
+        self._should_save = (
+            tools.Every(int(config.save_checkpoint_every)) if int(config.save_checkpoint_every) > 0 else None
+        )
         # Resume state
         if initial_step > 0:
             self._step = initial_step

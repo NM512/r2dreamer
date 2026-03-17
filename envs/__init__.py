@@ -1,5 +1,6 @@
-from . import parallel, wrappers
 from env_stepper import CpuEnvStepper, GpuEnvStepper
+
+from . import parallel, wrappers
 
 
 def make_envs(config):

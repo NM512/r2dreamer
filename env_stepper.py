@@ -47,7 +47,7 @@ class EnvStepper(Protocol):
         """Reset all environments to the start of a new episode."""
         ...
 
-    def step(self, action: torch.Tensor, done: torch.Tensor) -> Tuple[TensorDict, torch.Tensor]:
+    def step(self, action: torch.Tensor, done: torch.Tensor) -> tuple[TensorDict, torch.Tensor]:
         """Step all environments.
 
         Parameters
@@ -94,7 +94,7 @@ class CpuEnvStepper:
         """No-op — ParallelEnv resets via the ``done`` flag passed to ``step()``."""
         pass
 
-    def step(self, action: torch.Tensor, done: torch.Tensor) -> Tuple[TensorDict, torch.Tensor]:
+    def step(self, action: torch.Tensor, done: torch.Tensor) -> tuple[TensorDict, torch.Tensor]:
         # Step environments on CPU
         # (B, A)
         act_cpu = action.detach().to("cpu")
@@ -140,7 +140,7 @@ class GpuEnvStepper:
         """Force-reset all IsaacLab environments to episode start."""
         self._env.reset()
 
-    def step(self, action: torch.Tensor, done: torch.Tensor) -> Tuple[TensorDict, torch.Tensor]:
+    def step(self, action: torch.Tensor, done: torch.Tensor) -> tuple[TensorDict, torch.Tensor]:
         assert action.device.type == "cuda", f"GpuEnvStepper expects a CUDA action tensor, got {action.device}"
         # Pass tensors directly — no CPU round-trip.
         trans, done = self._env.step(action, done)

@@ -7,7 +7,7 @@ exposes to ``OnlineTrainer`` and ``Buffer``, but without any CPU round-trip:
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import gymnasium as gym
 import numpy as np
@@ -16,25 +16,24 @@ from isaaclab.envs import DirectRLEnv, ManagerBasedRLEnv
 from isaaclab.envs.common import VecEnvStepReturn
 from tensordict import TensorDict
 
-
 # =============================================================================
 # Terminal-observation capture subclasses
 # =============================================================================
 #
 # Terminal observation capture
 
-# IsaacLab runs N environments in parallel on the GPU. When an environment 
-# terminates or is truncated, IsaacLab **auto-resets it inside `step()`** and 
-# returns the post-reset observation as the env's entry in `obs_dict`. The true 
+# IsaacLab runs N environments in parallel on the GPU. When an environment
+# terminates or is truncated, IsaacLab **auto-resets it inside `step()`** and
+# returns the post-reset observation as the env's entry in `obs_dict`. The true
 # terminal observation is silently overwritten before it is ever returned.
 
-# This is a problem for Dreamer because the terminal reward must be paired with 
-# the true terminal observation. Pairing it with the reset obs misattributes 
+# This is a problem for Dreamer because the terminal reward must be paired with
+# the true terminal observation. Pairing it with the reset obs misattributes
 # the reward to a state that never produced it.
 
-# The `R2DreamerRLEnv` and `R2DreamerDirectRLEnv` base classes override 
-# `_reset_idx` to capture observations before the reset and store them in 
-# `extras["terminal_obs"]`. The `IsaacLabVecEnv` wrapper swaps these in on the 
+# The `R2DreamerRLEnv` and `R2DreamerDirectRLEnv` base classes override
+# `_reset_idx` to capture observations before the reset and store them in
+# `extras["terminal_obs"]`. The `IsaacLabVecEnv` wrapper swaps these in on the
 # step an episode ends, matching the data flow expected by Dreamer's world model.
 
 
@@ -53,9 +52,7 @@ class R2DreamerRLEnv(ManagerBasedRLEnv):
         # the true terminal obs to the agent.
         if len(env_ids) > 0:
             terminal_obs = self.observation_manager.compute()
-            self.extras["terminal_obs"] = {
-                key: val[env_ids].clone() for key, val in terminal_obs.items()
-            }
+            self.extras["terminal_obs"] = {key: val[env_ids].clone() for key, val in terminal_obs.items()}
             self.extras["terminal_env_ids"] = env_ids
         super()._reset_idx(env_ids)
 
@@ -77,9 +74,7 @@ class R2DreamerDirectRLEnv(DirectRLEnv):
     def _reset_idx(self, env_ids: Sequence[int]):
         if len(env_ids) > 0:
             terminal_obs = self._get_observations()
-            self.extras["terminal_obs"] = {
-                key: val[env_ids].clone() for key, val in terminal_obs.items()
-            }
+            self.extras["terminal_obs"] = {key: val[env_ids].clone() for key, val in terminal_obs.items()}
             self.extras["terminal_env_ids"] = env_ids
         super()._reset_idx(env_ids)
 
@@ -96,7 +91,7 @@ class IsaacLabVecEnv:
     ----------
     env:
         An unwrapped IsaacLab env that captures terminal observations
-        before auto-reset (e.g. ``R2DreamerRLEnv``, ``R2DreamerDirectRLEnv``, 
+        before auto-reset (e.g. ``R2DreamerRLEnv``, ``R2DreamerDirectRLEnv``,
         or any subclass that populates ``extras["terminal_obs"]``).
     """
 
