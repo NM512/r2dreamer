@@ -132,10 +132,14 @@ def _make_env(config, gym_id, render_mode, simulation_app, pre_wrap_fns=(), post
         unwrapped = isaac_env.unwrapped
         _patch_direct_env(unwrapped)
 
+    for fn in pre_wrap_fns:
+        fn(unwrapped)
+
+    if post_create_fn is not None:
+        post_create_fn(unwrapped)
+
     return make_isaac_env(
         unwrapped,
-        pre_wrap_fns=pre_wrap_fns,
-        post_create_fn=post_create_fn,
         simulation_app=simulation_app,
     )
 

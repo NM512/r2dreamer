@@ -93,10 +93,4 @@ def make_isaac_env(unwrapped, pre_wrap_fns=(), post_create_fn=None, simulation_a
         unwrapped, (R2DreamerRLEnv, R2DreamerDirectRLEnv)
     ), f"Expected R2DreamerRLEnv or R2DreamerDirectRLEnv, got {type(unwrapped).__name__}"
 
-    for fn in pre_wrap_fns:
-        fn(unwrapped)
-
-    if post_create_fn is not None:
-        post_create_fn(unwrapped)
-
     return IsaacLabVecEnv(unwrapped, simulation_app=simulation_app)
