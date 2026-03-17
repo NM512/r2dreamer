@@ -62,13 +62,13 @@ warnings.filterwarnings("ignore")
 torch.set_float32_matmul_precision("high")
 
 # Register IsaacLab task environments (triggers gymnasium gym.register calls).
-import isaaclab_tasks  # noqa: F401
+import isaaclab_tasks  # noqa: F401, E402
 
-import tools
-from buffer import Buffer
-from dreamer import Dreamer
-from envs import make_envs
-from trainer import OnlineTrainer
+import tools  # noqa: E402
+from buffer import Buffer  # noqa: E402
+from dreamer import Dreamer  # noqa: E402
+from envs import make_envs  # noqa: E402
+from trainer import OnlineTrainer  # noqa: E402
 
 # Builder function: set by the entry point before calling main().
 # Signature: build_env(env_config, vision, simulation_app) -> IsaacLabVecEnv
@@ -239,9 +239,9 @@ def run(config, build_env, simulation_app, vision=False):
         print("\nTraining interrupted by user (Ctrl+C).")
         exit_code = 1
     except Exception as e:
-        print(f"\n{'='*60}")
+        print(f"\n{'='*60}")  # noqa: E226
         print(f"TRAINING CRASHED: {type(e).__name__}: {e}")
-        print(f"{'='*60}")
+        print(f"{'='*60}")  # noqa: E226
         import traceback
 
         traceback.print_exc()

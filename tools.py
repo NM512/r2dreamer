@@ -57,7 +57,6 @@ class AnsiFilter(io.TextIOBase):
         self._partial = ""  # current incomplete line (no trailing \n yet)
 
     def write(self, s):
-        n = len(s)
         # Prepend any leftover partial text so split sequences are handled.
         data = self._partial + s
         self._partial = ""
@@ -82,7 +81,7 @@ class AnsiFilter(io.TextIOBase):
 
         self._emit_text(data[pos:])
         self._flush_completed()
-        return n
+        return len(s)
 
     def _emit_text(self, text):
         """Process plain text (no ANSI sequences), splitting on newlines."""

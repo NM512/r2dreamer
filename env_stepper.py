@@ -14,7 +14,7 @@ provided:
 
 from __future__ import annotations
 
-from typing import Protocol, Tuple
+from typing import Protocol
 
 import torch
 from tensordict import TensorDict

@@ -24,7 +24,7 @@ for _arg in sys.argv[1:]:
             sys.argv.insert(1, "--enable_cameras")
         break
 
-from isaaclab.app import AppLauncher
+from isaaclab.app import AppLauncher  # noqa: E402
 
 parser = argparse.ArgumentParser(description="Train r2dreamer cartpole with IsaacLab.")
 AppLauncher.add_app_launcher_args(parser)
