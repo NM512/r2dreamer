@@ -99,7 +99,7 @@ def _cartpole_camera_cfg(env_cfg, height, width):
     env_cfg.sim.render = RenderCfg(antialiasing_mode="Off")
 
 
-def _make_env(config, gym_id, render_mode, simulation_app, pre_wrap_fns=(), post_create_fn=None, env_cfg_fns=()):
+def _make_env(config, gym_id, render_mode, simulation_app, pre_wrap_fns=(), env_cfg_fns=()):
     """Construct a GPU-resident IsaacLab env from a stock gym ID.
 
     Args:
@@ -108,7 +108,6 @@ def _make_env(config, gym_id, render_mode, simulation_app, pre_wrap_fns=(), post
         render_mode: ``"rgb_array"`` for vision, ``None`` for proprio.
         simulation_app: The IsaacLab simulation app instance.
         pre_wrap_fns: Callables applied to the unwrapped env before wrapping.
-        post_create_fn: Callable applied after env creation.
         env_cfg_fns: Callables applied to env_cfg before instantiation.
             Use for task-specific overrides (camera, observations, ...).
     """
@@ -134,9 +133,6 @@ def _make_env(config, gym_id, render_mode, simulation_app, pre_wrap_fns=(), post
 
     for fn in pre_wrap_fns:
         fn(unwrapped)
-
-    if post_create_fn is not None:
-        post_create_fn(unwrapped)
 
     return make_isaac_env(
         unwrapped,
@@ -194,7 +190,6 @@ def _build_cartpole_direct_dmc_env(config, vision, simulation_app):
     ids = KNOWN_TASKS["cartpole_balance_direct_dmc"]
     gym_id = ids["vision"] if vision else ids["proprio"]
     render_mode = "rgb_array" if vision else None
-    post_create_fn = apply_dmc_cartpole_colors if vision else None
 
     pre_wrap_fns = [
         patch_no_termination,
@@ -202,6 +197,8 @@ def _build_cartpole_direct_dmc_env(config, vision, simulation_app):
         patch_dmc_cartpole_obs,
         patch_dmc_cartpole_reset,
     ]
+    if vision:
+        pre_wrap_fns.append(apply_dmc_cartpole_colors)
 
     env_cfg_fns = []
     if vision:
@@ -215,7 +212,6 @@ def _build_cartpole_direct_dmc_env(config, vision, simulation_app):
         render_mode,
         simulation_app,
         pre_wrap_fns,
-        post_create_fn,
         env_cfg_fns=env_cfg_fns,
     )
 
@@ -227,7 +223,7 @@ def _build_cartpole_dmc_env(config, vision, simulation_app):
     ids = KNOWN_TASKS["cartpole_balance_dmc"]
     gym_id = ids["vision"] if vision else ids["proprio"]
     render_mode = "rgb_array" if vision else None
-    post_create_fn = apply_dmc_cartpole_colors if vision else None
+    pre_wrap_fns = [apply_dmc_cartpole_colors] if vision else []
 
     env_cfg_fns = []
     if vision:
@@ -245,7 +241,7 @@ def _build_cartpole_dmc_env(config, vision, simulation_app):
         gym_id,
         render_mode,
         simulation_app,
-        post_create_fn=post_create_fn,
+        pre_wrap_fns=pre_wrap_fns,
         env_cfg_fns=env_cfg_fns,
     )
 
