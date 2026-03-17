@@ -10,10 +10,6 @@ provided:
 
 * **GpuEnvStepper** — wraps ``IsaacLabVecEnv`` (GPU-resident simulation).
   All tensors stay on the same CUDA device; no copies are needed.
-
-Both implementations satisfy the same contract: the caller passes and receives
-tensors on ``agent_device`` (typically ``cuda:0``).  All device conversion is
-internal to the stepper.
 """
 
 from __future__ import annotations
@@ -64,7 +60,7 @@ class EnvStepper(Protocol):
         Returns
         -------
         trans : TensorDict
-            Transition data ``(B, …)`` on ``agent_device``.
+            Transition data ``(B, ...)`` on ``agent_device``.
         done : torch.Tensor
             Bool tensor ``(B,)`` on ``agent_device``.
         """
@@ -79,8 +75,7 @@ class EnvStepper(Protocol):
 class CpuEnvStepper:
     """Steps ``ParallelEnv`` on CPU and transfers results to GPU.
 
-    This reproduces the original ``OnlineTrainer`` data-flow:
-    GPU action → CPU → env.step() → pinned CPU tensor → GPU (non_blocking).
+    GPU action -> CPU -> env.step() -> pinned CPU tensor -> GPU (non_blocking).
     """
 
     def __init__(self, env, agent_device: torch.device):
@@ -125,7 +120,7 @@ class GpuEnvStepper:
 
     Both input and output tensors stay on the simulation device (CUDA).
     The ``done`` tensor is forwarded for API compatibility but IsaacLab
-    manages auto-resets internally — the ``is_first`` flag in the returned
+    manages auto-resets internally, the ``is_first`` flag in the returned
     ``TensorDict`` is the authoritative reset signal.
     """
 

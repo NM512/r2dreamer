@@ -1,3 +1,5 @@
+# This Dockerfile is used to build the image for R2Dreamer, which is based on NVIDIA Isaac Lab.
+# Detailed instructions can be found in /docs/isaaclab.md and /docs/docker.md.
 FROM nvcr.io/nvidia/isaac-lab:2.3.1
 
 ARG WS=/workspace/r2dreamer

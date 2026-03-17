@@ -3,53 +3,6 @@
 IsaacLab runs a fully GPU-resident simulation with N parallel environments
 built in.  This wrapper adapts it to the same interface that ``ParallelEnv``
 exposes to ``OnlineTrainer`` and ``Buffer``, but without any CPU round-trip:
-
-  - ``step(action, done)`` accepts and returns GPU tensors directly.
-  - The returned ``TensorDict`` is on the same CUDA device as the sim.
-  - The ``done`` argument is accepted for API compatibility but ignored —
-    IsaacLab performs per-environment auto-reset internally.
-  - Scalar observation fields (``is_first``, ``is_terminal``, ``is_last``,
-    ``reward``) are lifted from shape ``(B,)`` to ``(B, 1)`` to match the
-    layout that ``Buffer.add_transition`` expects (it calls
-    ``data.unsqueeze(1)`` which turns ``(B, 1, *)`` into ``(B, 1, 1, *)``
-    for 1-D fields — the lift here keeps things consistent with
-    ``ParallelEnv.lift_dim``).
-
-Terminal observation handling
------------------------------
-IsaacLab auto-resets terminated/truncated envs *inside* its ``step()`` and
-returns the post-reset observation.  The true terminal obs and reward would
-be lost.
-
-This wrapper requires the inner env to be an ``R2DreamerRLEnv``,
-``R2DreamerDirectRLEnv``, or any IsaacLab env subclass that sets
-``extras["terminal_obs"]`` and ``extras["terminal_env_ids"]`` before
-the auto-reset.  Both classes are defined below.
-
-On the step where an episode ends the wrapper:
-  1. Swaps in the **terminal obs** (from ``extras``) for the done envs.
-  2. Keeps the **terminal reward** (no longer zeroed).
-  3. Sets ``is_last=True``, ``is_terminal=terminated`` (not truncated),
-     ``is_first=False``.
-  4. Records those env indices in ``_pending_first``.
-
-On the **next** call, for envs with ``_pending_first=True``:
-  - ``is_first=True``, ``reward=0`` (the obs is the post-reset obs that
-    IsaacLab already computed — this is the initial obs of the new episode).
-
-This matches the data flow of ``ParallelEnv`` (DMC): the terminal step
-carries the true terminal obs + reward, and the following step carries
-``is_first=True`` with the reset obs and ``reward=0``.
-
-The initial reset obs (obs_0) from the very first episode is effectively
-"lost" — it is consumed by the ``is_first=True`` step that carries
-``reward=0``.  This is acceptable since the first step has zero reward
-anyway.
-
-Usage::
-
-    vec_env = make_isaac_env(unwrapped_env)
-    # vec_env now satisfies the ParallelEnv interface expected by OnlineTrainer.
 """
 
 from __future__ import annotations
@@ -68,20 +21,21 @@ from tensordict import TensorDict
 # Terminal-observation capture subclasses
 # =============================================================================
 #
-# IsaacLab's step() auto-resets terminated envs *before* computing the final
-# observations, so the true terminal obs is lost.  These subclasses override
-# ``_reset_idx`` to capture observations **before** the reset, storing them in
-# ``self.extras["terminal_obs"]``.  The downstream ``IsaacLabVecEnv`` wrapper
-# swaps them in on the step an episode ends.
-#
-# The override is intentionally minimal (~10 lines per class) to stay resilient
-# to base-class changes across IsaacLab versions.
-#
-# For your own tasks, inherit from ``R2DreamerRLEnv`` (ManagerBased) or
-# ``R2DreamerDirectRLEnv`` (Direct) directly in the task definition.  For
-# third-party Direct envs that you can't modify, see ``_patch_direct_env``
-# in ``train_isaaclab.py`` which dynamically injects ``R2DreamerDirectRLEnv``
-# into the class hierarchy.
+# Terminal observation capture
+
+# IsaacLab runs N environments in parallel on the GPU. When an environment 
+# terminates or is truncated, IsaacLab **auto-resets it inside `step()`** and 
+# returns the post-reset observation as the env's entry in `obs_dict`. The true 
+# terminal observation is silently overwritten before it is ever returned.
+
+# This is a problem for Dreamer because the terminal reward must be paired with 
+# the true terminal observation. Pairing it with the reset obs misattributes 
+# the reward to a state that never produced it.
+
+# The `R2DreamerRLEnv` and `R2DreamerDirectRLEnv` base classes override 
+# `_reset_idx` to capture observations before the reset and store them in 
+# `extras["terminal_obs"]`. The `IsaacLabVecEnv` wrapper swaps these in on the 
+# step an episode ends, matching the data flow expected by Dreamer's world model.
 
 
 class R2DreamerRLEnv(ManagerBasedRLEnv):
@@ -138,22 +92,12 @@ class R2DreamerDirectRLEnv(DirectRLEnv):
 class IsaacLabVecEnv:
     """Wraps a vectorized IsaacLab env for use with r2dreamer.
 
-    All data remains on the GPU throughout.  The wrapper tracks ``is_first``,
-    ``is_last``, and ``is_terminal`` from IsaacLab's ``terminated``/
-    ``truncated`` signals and injects them into the returned ``TensorDict``.
-
-    The inner env **must** populate ``extras["terminal_obs"]`` and
-    ``extras["terminal_env_ids"]`` so that the true terminal observation can
-    be returned on the step an episode ends.  Both ``R2DreamerRLEnv``
-    (ManagerBased) and ``R2DreamerDirectRLEnv`` (Direct) provide this.
-
     Parameters
     ----------
     env:
         An unwrapped IsaacLab env that captures terminal observations
-        before auto-reset (e.g. ``R2DreamerRLEnv``,
-        ``R2DreamerDirectRLEnv``, or any subclass that populates
-        ``extras["terminal_obs"]``).
+        before auto-reset (e.g. ``R2DreamerRLEnv``, ``R2DreamerDirectRLEnv``, 
+        or any subclass that populates ``extras["terminal_obs"]``).
     """
 
     def __init__(self, env, simulation_app=None):
@@ -215,10 +159,10 @@ class IsaacLabVecEnv:
         Parameters
         ----------
         action:
-            Float tensor of shape ``(B, A)`` **on any device** — passed
+            Float tensor of shape ``(B, A)`` **on any device**, passed
             directly to the IsaacLab env which expects a GPU tensor.
         done:
-            Bool tensor of shape ``(B,)`` — accepted for API compatibility
+            Bool tensor of shape ``(B,)``, accepted for API compatibility
             with ``ParallelEnv`` but intentionally ignored.  IsaacLab
             manages per-environment auto-resets internally.
 
@@ -253,12 +197,6 @@ class IsaacLabVecEnv:
 
         # ------------------------------------------------------------------
         # Swap in terminal observations for envs that just ended.
-        #
-        # The inner env (R2DreamerRLEnv / R2DreamerDirectRLEnv) captured obs
-        # *before* the auto-reset and placed them in extras["terminal_obs"].
-        # IsaacLab's
-        # obs_dict currently holds the post-reset obs for these envs —
-        # replace them with the true terminal obs.
         # ------------------------------------------------------------------
         terminal_obs = extras.get("terminal_obs")
         terminal_env_ids = extras.get("terminal_env_ids")
@@ -276,24 +214,9 @@ class IsaacLabVecEnv:
         # ------------------------------------------------------------------
         # is_first: True for envs whose PREVIOUS step was an episode end
         # (they are now showing the first obs of the new episode).
-        # Also True on the very first call after __init__/reset().
-        # NOTE: For envs with _pending_first, the obs is the post-reset obs
-        # returned by IsaacLab (obs_0 of new episode).  If an env has BOTH
-        # _pending_first AND episode_done on the same step (episode lasted
-        # exactly 1 step after reset), we handle that below.
         is_first_now = self._is_first | self._pending_first
 
-        # For pending_first envs: is_first=True takes priority.  If the env
-        # also terminated this step (episode_done=True), the terminal obs
-        # swap above already placed the terminal obs in data.  But we need
-        # the is_first row to carry the RESET obs, not the terminal obs.
-        # Since this is an extremely rare edge case (1-step episode right
-        # after reset) and the terminal obs was already captured, we leave
-        # the terminal obs in place — the world model sees is_first=True
-        # which resets the latent state, and the terminal reward from the
-        # previous action is captured in the reward.
-        #
-        # However, we must NOT fire is_first on the SAME step as episode_done
+        # We must NOT fire is_first on the SAME step as episode_done
         # for envs that are finishing normally (not pending).  is_first fires
         # on the NEXT step for those.
         data["is_first"] = is_first_now.unsqueeze(-1)
@@ -304,9 +227,8 @@ class IsaacLabVecEnv:
         # is_last: True whenever the episode ended for any reason.
         data["is_last"] = episode_done.unsqueeze(-1)
 
-        # reward: Keep the terminal reward for done envs (no longer zeroed!).
         # For pending_first envs (showing the first obs of a new episode),
-        # zero the reward — the reset obs carries no meaningful reward.
+        # zero the reward, the reset obs carries no meaningful reward.
         # Exception: if a pending_first env ALSO terminates this step (a
         # 1-step episode), keep the terminal reward.
         reward_out = reward.float()

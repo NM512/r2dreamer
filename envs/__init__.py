@@ -5,11 +5,8 @@ from env_stepper import CpuEnvStepper, GpuEnvStepper
 def make_envs(config):
     suite, _ = config.task.split("_", 1)
     if suite == "isaaclab":
-        # IsaacLab is already a GPU-resident vectorized env — it cannot be
-        # wrapped in ParallelEnv (single sim instance, no subprocess isolation
-        # needed).  The caller (train_isaaclab.py) is responsible for building
-        # env_cfg and patches, then passing the ready IsaacLabVecEnv via
-        # config.isaac_vec_env before calling make_envs.
+        # IsaacLab is already a GPU-resident vectorized env, it cannot be
+        # wrapped in ParallelEnv.
         vec_env = config.isaac_vec_env
         device = getattr(config, "device", "cuda:0")
         stepper = GpuEnvStepper(vec_env, device)
@@ -84,23 +81,11 @@ def make_env(config, id):
 def make_isaac_env(unwrapped, pre_wrap_fns=(), post_create_fn=None, simulation_app=None):
     """Wrap an already-constructed IsaacLab env as an ``IsaacLabVecEnv``.
 
-    The caller is responsible for constructing the unwrapped env — either by
-    instantiating ``R2DreamerRLEnv`` directly (ManagerBased) or by using
-    ``gym.make`` and patching (third-party Direct envs).  For your own Direct
-    envs, simply inherit from ``R2DreamerDirectRLEnv`` in the task definition
-    and instantiate directly — no patching needed.
-
     Parameters
     ----------
     unwrapped:
         A fully constructed IsaacLab env instance (``R2DreamerRLEnv``,
         ``R2DreamerDirectRLEnv``, or a subclass of either).
-    pre_wrap_fns:
-        Callables ``fn(unwrapped_env)`` applied to the unwrapped env
-        before wrapping (e.g. reward/obs/termination patches).
-    post_create_fn:
-        Optional callable ``fn(unwrapped_env)`` applied after pre_wrap_fns
-        (e.g. scene colour overrides that require the sim to be running).
     """
     from envs.isaaclab import IsaacLabVecEnv, R2DreamerDirectRLEnv, R2DreamerRLEnv
 

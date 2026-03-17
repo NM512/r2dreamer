@@ -1,66 +1,9 @@
 """Generic IsaacLab entry-point for r2dreamer.
 
 This script is a **template** showing the exact pattern to follow when
-training r2dreamer on any IsaacLab task.  Copy this file and add your
-own ``build_env`` function.  The r2dreamer library (``envs/``,
-``dreamer.py``, ``trainer.py``, ...) does not need to be modified.
-
-For a working benchmark example, see the cartpole variant in
-``recipes/isaaclab/cartpole/train_cartpole.py``.
-
-IsaacLab requires ``AppLauncher`` to be called before any Isaac/USD imports,
-so this script uses a mandatory two-phase import pattern:
-
-  Phase 1 -- parse CLI args, launch AppLauncher, get simulation_app.
-  Phase 2 -- all other imports (torch, hydra, dreamer modules, ...).
-
-When this module is **imported** (e.g. by ``train_cartpole.py``), Phase 1
-is skipped.  The importer must have already started AppLauncher and must
-set ``simulation_app`` and ``_vision`` before calling ``main()``.
-
-The core training logic lives in ``run()``, which takes the builder
-function as an explicit parameter::
-
-    run(config, build_env, simulation_app, vision)
-
-``main()`` is a thin ``@hydra.main`` wrapper that delegates to ``run()``.
-It reads ``_build_env``, ``simulation_app``, and ``_vision`` from module
-state because Hydra only passes ``config``.
-
-Usage
------
-Your task env should inherit from ``R2DreamerRLEnv`` (ManagerBased) or
-``R2DreamerDirectRLEnv`` (Direct) for terminal observation capture, then
-wrap with ``make_isaac_env()``::
-
-    from envs import make_isaac_env
-    from envs.isaaclab import R2DreamerRLEnv
-
-    class MyEnv(R2DreamerRLEnv):
-        ...
-
-    def build_my_task(config, vision, simulation_app):
-        env = MyEnv(cfg=my_cfg, render_mode="rgb_array" if vision else None)
-        return make_isaac_env(env, simulation_app=simulation_app)
-
-For stock IsaacLab envs registered in the gymnasium registry, use
-``make_env_cfg()`` to resolve the gym ID and set common config fields,
-then instantiate and wrap the env yourself::
-
-    def build_my_task(config, vision, simulation_app):
-        env_cfg, spec = train_isaaclab.make_env_cfg(config, "Isaac-MyTask-v0")
-        env = MyEnv(cfg=env_cfg, render_mode="rgb_array" if vision else None)
-        return make_isaac_env(env, simulation_app=simulation_app)
-
-Then in your entry point, before calling main()::
-
-    import train_isaaclab
-    train_isaaclab._build_env = build_my_task
-    train_isaaclab.main()
-
-Monitor with TensorBoard::
-
-    tensorboard --logdir logdir/
+training r2dreamer on any IsaacLab task. See the /docs/isaaclab.md guide
+for detailed instructions on how to use and customize this script for 
+your own IsaacLab training runs.
 """
 
 # =============================================================================

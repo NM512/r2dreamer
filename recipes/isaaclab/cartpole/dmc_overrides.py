@@ -328,14 +328,6 @@ def dmc_balance_reward(
     ``_get_rewards()``.  To produce the same per-step total we return
     ``reward * action_repeat / step_dt`` so that after the ``* dt``
     multiplication the result is ``reward * action_repeat``.
-
-    Config usage::
-
-        RewTerm(func=dmc_balance_reward, weight=1.0, params={
-            "asset_cfg": SceneEntityCfg("robot",
-                joint_names=["slider_to_cart", "cart_to_pole"]),
-            "action_repeat": 2,
-        })
     """
     asset = env.scene[asset_cfg.name]
     # joint_ids may be a slice when joints are contiguous; index the data
@@ -362,13 +354,6 @@ def dmc_cartpole_obs(
     """DMC-format cartpole observation: ``[cart_x, cos(theta), sin(theta), cart_vel, pole_vel]``.
 
     Returns a tensor of shape ``(num_envs, 5)``.
-
-    Config usage::
-
-        ObsTerm(func=dmc_cartpole_obs, params={
-            "asset_cfg": SceneEntityCfg("robot",
-                joint_names=["slider_to_cart", "cart_to_pole"]),
-        })
     """
     asset = env.scene[asset_cfg.name]
     jpos = asset.data.joint_pos[:, asset_cfg.joint_ids]
@@ -395,13 +380,6 @@ def reset_dmc_cartpole_state(
       - pole angle:     ``Uniform(-0.034, 0.034)`` rad (near-vertical)
       - cart velocity:  ``Normal(0, 0.01)``
       - pole velocity:  ``Normal(0, 0.01)``
-
-    Config usage::
-
-        EventTerm(func=reset_dmc_cartpole_state, mode="reset", params={
-            "asset_cfg": SceneEntityCfg("robot",
-                joint_names=["slider_to_cart", "cart_to_pole"]),
-        })
     """
     asset = env.scene[asset_cfg.name]
     joint_pos = asset.data.default_joint_pos[env_ids].clone()

@@ -102,19 +102,6 @@ def _cartpole_camera_cfg(env_cfg, height, width):
 def _make_env(config, gym_id, render_mode, simulation_app, pre_wrap_fns=(), post_create_fn=None, env_cfg_fns=()):
     """Construct a GPU-resident IsaacLab env from a stock gym ID.
 
-    Uses ``train_isaaclab.make_env_cfg()`` for generic config setup, then
-    applies task-specific ``env_cfg_fns``, instantiates with terminal-obs
-    capture, and wraps for r2dreamer.
-
-    For **ManagerBased** envs, instantiates ``R2DreamerRLEnv`` directly.
-    For **Direct** (third-party) envs, uses ``gym.make`` then patches the
-    class hierarchy to inject ``R2DreamerDirectRLEnv``.
-
-    This helper exists because the stock IsaacLab cartpole envs don't
-    inherit from the R2Dreamer base classes.  For your own tasks, inherit
-    from ``R2DreamerRLEnv`` or ``R2DreamerDirectRLEnv`` directly and call
-    ``make_isaac_env()`` instead.
-
     Args:
         config: Hydra env config with env_num, action_repeat, seed, etc.
         gym_id: Gymnasium env ID string.
@@ -176,7 +163,7 @@ def _build_cartpole_env(config, vision, simulation_app):
     return _make_env(config, gym_id, render_mode, simulation_app, env_cfg_fns=env_cfg_fns)
 
 def _build_cartpole_direct_env(config, vision, simulation_app):
-    """Build a Direct cartpole env (stock IsaacLab behaviour, no patches)."""
+    """Build a Direct cartpole env (stock IsaacLab behaviour)."""
     ids = KNOWN_TASKS["cartpole_balance_direct"]
     gym_id = ids["vision"] if vision else ids["proprio"]
     render_mode = "rgb_array" if vision else None
@@ -230,7 +217,7 @@ def _build_cartpole_direct_dmc_env(config, vision, simulation_app):
 
 
 def _build_cartpole_dmc_env(config, vision, simulation_app):
-    """Build a ManagerBased cartpole env with DMC-exact overrides via config."""
+    """Build a ManagerBased cartpole env with DMC-style overrides via config."""
     from cartpole.dmc_overrides import apply_dmc_cartpole_colors
 
     ids = KNOWN_TASKS["cartpole_balance_dmc"]

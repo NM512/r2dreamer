@@ -448,18 +448,10 @@ class WandbBackend(LoggerBackend):
         Typical keys: ``project``, ``name``, ``config``, ``group``,
         ``tags``, ``notes``, ``mode``, etc.  See the wandb documentation
         for the full list.
-
-    Example
-    -------
-    >>> backend = WandbBackend({
-    ...     "project": "my-project",
-    ...     "name": "run-42",
-    ...     "config": {"lr": 3e-4, "seed": 42},
-    ... })
     """
 
     def __init__(self, wandb_cfg: dict):
-        import wandb  # deferred import — only runs if caller creates this backend
+        import wandb
 
         self._wandb = wandb
         if wandb.run is None:
