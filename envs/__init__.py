@@ -60,6 +60,15 @@ def make_env(config, id):
             config.camera,
             config.seed + id,
         )
+    elif suite == "nethack":
+        import envs.nethack as nethack
+        env = nethack.NetHack(
+            task,
+            size=config.size,
+            max_episode_steps=config.time_limit,
+            seed=config.seed + id,
+        )
+        env = wrappers.OneHotAction(env)
     else:
         raise NotImplementedError(suite)
     env = wrappers.TimeLimit(env, config.time_limit // config.action_repeat)

@@ -1,0 +1,18 @@
+task: nethack_Score
+steps: 1.01e6
+env_num: 1
+eval_episode_num: 2
+action_repeat: 1
+train_ratio: 64
+time_limit: 5000
+seed: ${seed}
+device: ${device}
+size: [64, 64]
+
+encoder:
+  mlp_keys: '$^'
+  cnn_keys: 'image'
+
+decoder:
+  mlp_keys: '$^'
+  cnn_keys: 'image'
